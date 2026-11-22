@@ -1,0 +1,6 @@
+{
+  "name": "hyperion-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SOC analyst dashboard. Implemented in Phase 3."
+}
