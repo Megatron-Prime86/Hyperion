@@ -2,15 +2,21 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+import uuid
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_session, init_db
-from app.models import Alert, AuditLog, utcnow
-from app.schemas import AlertIn, AlertOut, HealthOut, IngestResult, ReplayResult
+from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, utcnow
+from app.pipeline import dispatch
+from app.schemas import (
+    AlertIn, AlertOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, ReplayResult, TriageReportOut,
+)
 from app.simulator import replay_alerts
 
 MAX_BATCH = 500
@@ -120,6 +126,7 @@ async def _store(session: AsyncSession, alerts: list[AlertIn], action: str, acto
         )
     )
     await session.commit()
+    await dispatch(session, [row.id for row in rows])
     for row in rows:
         await session.refresh(row)
     return rows
@@ -156,3 +163,36 @@ async def replay(session: AsyncSession = Depends(get_session)) -> ReplayResult:
         name = str(payload.get("scenario") or "unspecified")
         scenarios[name] = scenarios.get(name, 0) + 1
     return ReplayResult(seeded=len(rows), scenarios=scenarios, alerts=[_out(row) for row in rows])
+
+
+@app.get("/api/v1/incidents", response_model=list[IncidentOut])
+async def list_incidents(
+    status: str | None = None,
+    tier: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+) -> list[Incident]:
+    query = select(Incident).order_by(Incident.risk_score.desc().nulls_last(), Incident.last_seen.desc()).limit(limit)
+    if status:
+        query = query.where(Incident.status == status)
+    if tier:
+        query = query.where(Incident.risk_tier == tier)
+    return list(await session.scalars(query))
+
+
+@app.get("/api/v1/incidents/{incident_id}", response_model=IncidentDetail)
+async def incident_detail(incident_id: uuid.UUID, session: AsyncSession = Depends(get_session)) -> IncidentDetail:
+    incident = await session.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    alerts = list(await session.scalars(select(Alert).where(Alert.incident_id == incident_id).order_by(Alert.event_time)))
+    enrichments = list(await session.scalars(select(Enrichment).where(Enrichment.alert_id.in_([a.id for a in alerts]))))
+    report = await session.scalar(
+        select(TriageReport).where(TriageReport.incident_id == incident_id).order_by(TriageReport.created_at.desc()).limit(1)
+    )
+    return IncidentDetail(
+        **IncidentOut.model_validate(incident).model_dump(),
+        alerts=[_out(a) for a in alerts],
+        enrichments=[EnrichmentOut.model_validate(e) for e in enrichments],
+        triage=TriageReportOut.model_validate(report) if report else None,
+    )

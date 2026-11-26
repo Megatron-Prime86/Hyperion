@@ -9,6 +9,10 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite drops tzinfo
+
+
 class Base(DeclarativeBase):
     pass
 

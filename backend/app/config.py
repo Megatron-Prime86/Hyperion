@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     anthropic_base_url: str = "https://api.anthropic.com"
     llm_model: str = ""
     correlation_window_minutes: int = 30
+    abuseipdb_api_key: str = ""
+    intel_timeout_seconds: float = 3.0
+    llm_timeout_seconds: float = 30.0
 
     @property
     def database_backend(self) -> str:
