@@ -99,6 +99,7 @@ export default function IncidentPage() {
                     <span className="font-mono text-xs text-zinc-500">{fmt(a.event_time)}</span>
                     <Badge tone={a.severity}>{a.severity}</Badge>
                     <Badge>{a.source}</Badge>
+                    {a.dup_count > 1 && <Badge tone="medium">×{a.dup_count}</Badge>}
                     <span className="font-medium">{a.title}</span>
                   </div>
                   <p className="mt-1 text-sm text-zinc-400">{a.description}</p>

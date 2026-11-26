@@ -8,7 +8,7 @@ export type Incident = {
 export type Alert = {
   id: string; source: string; title: string; description: string; severity: string; event_time: string;
   src_ip: string | null; dst_ip: string | null; user: string | null; host: string | null;
-  domain: string | null; file_hash: string | null;
+  domain: string | null; file_hash: string | null; dup_count: number;
 };
 export type Enrichment = {
   alert_id: string;
@@ -29,12 +29,27 @@ export type Audit = {
   note: string | null; detail: Record<string, unknown>; created_at: string;
 };
 
+export type Session = { access_token: string; username: string; role: "analyst" | "admin" };
+const KEY = "hyperion.session";
+
+export function getSession(): Session | null {
+  if (typeof window === "undefined") return null;
+  try { return JSON.parse(sessionStorage.getItem(KEY) ?? "null"); } catch { return null; }
+}
+export const setSession = (s: Session) => sessionStorage.setItem(KEY, JSON.stringify(s));
+export function logout() {
+  sessionStorage.removeItem(KEY);
+  window.location.assign("/login");
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getSession()?.access_token;
   const res = await fetch(`${API}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...init?.headers },
     cache: "no-store",
   });
+  if (res.status === 401 && !path.startsWith("/api/v1/auth/")) { logout(); throw new Error("Session expired"); }
   if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
   return res.json() as Promise<T>;
 }

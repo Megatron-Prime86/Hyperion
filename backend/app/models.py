@@ -54,6 +54,9 @@ class Alert(Base):
     domain: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     raw: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    dup_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -104,3 +107,13 @@ class AuditLog(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default="analyst", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

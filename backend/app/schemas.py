@@ -47,12 +47,15 @@ class AlertOut(BaseModel):
     host: str | None
     domain: str | None
     file_hash: str | None
+    dup_count: int = 1
+    last_seen: datetime | None = None
     incident_id: uuid.UUID | None
     created_at: datetime
 
 
 class IngestResult(BaseModel):
     accepted: int
+    duplicates: int = 0
     alerts: list[AlertOut]
 
 
@@ -141,7 +144,6 @@ class IncidentDetail(IncidentOut):
 class ActionIn(BaseModel):
     action: Literal["acknowledge", "escalate", "false_positive", "resolve"]
     note: str | None = Field(default=None, max_length=2000)
-    actor: str = Field(default="analyst", min_length=1, max_length=128)
 
 
 class AuditOut(BaseModel):
@@ -155,3 +157,15 @@ class AuditOut(BaseModel):
     note: str | None
     detail: dict[str, Any]
     created_at: datetime
+
+
+class LoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    username: str
+    role: Literal["analyst", "admin"]

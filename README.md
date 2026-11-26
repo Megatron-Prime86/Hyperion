@@ -2,45 +2,76 @@
 
 AI-powered alert triage and enrichment for SOC analysts.
 
-Alerts land in Postgres (or SQLite with no setup) via `POST /api/v1/alerts/ingest`; `POST /api/v1/simulator/replay` seeds benign noise, a suspicious login, and a multi-stage attack chain. Each ingest runs the pipeline: **enrichment** (IOCs, IP class, local threat intel, asset criticality, MITRE) -> **correlation** (incidents by shared `src_ip`/`user`/`host` within `CORRELATION_WINDOW_MINUTES`) -> **AI triage** (validated JSON, deterministic fallback). The dashboard comes in Phase 3.
+Alerts arrive via `POST /api/v1/alerts/ingest` (API key). Each new alert runs the pipeline: **dedup** (repeats fold into a counter) -> **enrichment** (IOCs, IP class, threat intel, asset criticality, MITRE) -> **correlation** (incidents by shared `src_ip`/`user`/`host` within `CORRELATION_WINDOW_MINUTES`) -> **AI triage** (validated JSON, deterministic fallback). Analysts work incidents in the Next.js dashboard.
 
-LLM: `LLM_PROVIDER=mock` (default, no key) | `openai` | `anthropic` with the matching key; `LLM_MODEL` overrides the default model. Invalid or failed LLM output falls back to deterministic scoring (`provider=fallback`).
-
-Async mode: set `CELERY_TASK_ALWAYS_EAGER=false` and run `celery -A app.pipeline.celery_app worker` from `backend/`. If Redis is unreachable, ingest processes inline.
-
-## Run (no Docker)
-
-SQLite is the default. Redis is optional; Celery falls back to eager mode when it is unset or `CELERY_TASK_ALWAYS_EAGER=true`.
+## Run locally (no Docker)
 
 ```bash
 cd backend
-uv venv --python 3.12
-uv pip install -e ".[dev]"
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+cp ../.env.example .env            # optional; blank secrets are generated at startup
+uv venv --python 3.12 && uv pip install -e ".[dev]"
+uv run uvicorn app.main:app --port 8000     # applies migrations on start; SQLite by default
 ```
-
-## Run (Docker)
+On first start the API log prints (once) any generated `INGEST_API_KEY`, `JWT_SECRET` and the `admin` password. Set them in `.env` to keep them stable.
 
 ```bash
-docker compose up --build
+cd frontend && npm install && npm run dev   # http://localhost:3000, API at http://localhost:8000
 ```
 
-API: `http://localhost:8000`. Postgres 18 and Redis 8 come up with the API. Copy `.env.example` if you want local overrides.
-
-## Verify
+## Run with Docker
 
 ```bash
-curl -s http://127.0.0.1:8000/api/v1/health
-curl -s -X POST http://127.0.0.1:8000/api/v1/alerts/ingest \
-  -H 'content-type: application/json' \
-  -d '{"title":"Blocked outbound DNS","severity":"low","src_ip":"10.1.1.8","user":"a.chen","host":"WKSTN-14"}'
-curl -s -X POST http://127.0.0.1:8000/api/v1/alerts/ingest \
-  -H 'content-type: application/json' \
-  -d '{"alerts":[{"title":"One"},{"title":"Two","severity":"high"}]}'
-curl -s -X POST http://127.0.0.1:8000/api/v1/simulator/replay
-curl -s http://127.0.0.1:8000/api/v1/incidents
-curl -s http://127.0.0.1:8000/api/v1/incidents/<incident-id>
-cd backend && pytest -q
+cp .env.example .env               # optional: set INGEST_API_KEY, ADMIN_PASSWORD, ANALYST_PASSWORD, JWT_SECRET
+docker compose up --build          # postgres, redis, api, celery worker, dashboard
+docker compose logs api | grep -i generated      # if you left secrets blank
 ```
 
-Ingest accepts one alert object, a JSON list, or `{"alerts":[...]}`.
+## Auth
+
+| Who | How | Can |
+|---|---|---|
+| Alert sources | `X-API-Key: <INGEST_API_KEY>` | `POST /api/v1/alerts/ingest` |
+| `analyst` | login -> Bearer token | view incidents/audit, Acknowledge / Escalate / False Positive / Resolve |
+| `admin` | login -> Bearer token | everything above + `POST /api/v1/simulator/replay` |
+
+`POST /api/v1/auth/login` with `{"username","password"}`. Failed logins are throttled (5 per minute per user and IP). The analyst account exists only when `ANALYST_PASSWORD` is set. The audit log records the signed-in username.
+
+## Database migrations (Alembic)
+
+```bash
+cd backend
+uv run alembic upgrade head                 # fresh database (the API also does this on start)
+uv run alembic stamp 0001 && uv run alembic upgrade head   # database created by Phases 1-3
+uv run alembic revision --autogenerate -m "describe change"   # after editing app/models.py
+```
+Set `AUTO_MIGRATE=false` to run migrations yourself.
+
+## Alert deduplication
+
+Alerts with the same source, title, severity and entities (`src_ip`, `dst_ip`, `user`, `host`, `domain`, `file_hash`) within `DEDUP_WINDOW_MINUTES` fold into one row with `dup_count`. The ingest response reports `accepted`, `duplicates` and the distinct alerts. The simulator bypasses dedup.
+
+## Try it
+
+```bash
+KEY=<INGEST_API_KEY>
+for i in 1 2 3; do curl -s -X POST localhost:8000/api/v1/alerts/ingest \
+  -H "X-API-Key: $KEY" -H 'content-type: application/json' \
+  -d '{"title":"Port scan","severity":"medium","src_ip":"10.1.1.8","host":"WKSTN-14"}'; done
+TOKEN=$(curl -s -X POST localhost:8000/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"<ADMIN_PASSWORD>"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+curl -s -X POST localhost:8000/api/v1/simulator/replay -H "Authorization: Bearer $TOKEN"
+curl -s localhost:8000/api/v1/incidents -H "Authorization: Bearer $TOKEN"
+```
+
+## Tests and CI
+
+```bash
+cd backend && uv run pytest -q
+```
+GitHub Actions (`.github/workflows/ci.yml`) runs pytest and `pip-audit` for the backend, and `npm ci`, build and `npm audit` for the frontend.
+
+## Configuration
+
+See `.env.example`. LLM: `LLM_PROVIDER=mock` (default) | `openai` | `anthropic` with the matching key; `LLM_MODEL` overrides the default. Invalid or failed LLM output falls back to deterministic scoring (`provider=fallback`). Async pipeline: `CELERY_TASK_ALWAYS_EAGER=false` plus `celery -A app.pipeline.celery_app worker`; if Redis is unreachable, ingest processes inline.
+
+The dashboard keeps its login token in `sessionStorage` (cleared when the tab closes). Put the API behind HTTPS before exposing it beyond localhost.

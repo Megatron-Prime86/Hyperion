@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type Incident } from "./api";
+import { api, getSession, type Incident } from "./api";
 import { Badge, Err, fmt, label } from "./ui";
 
 const CLOSED = ["resolved", "false_positive"];
@@ -13,6 +13,8 @@ export default function Queue() {
   const [status, setStatus] = useState("");
   const [tier, setTier] = useState("");
   const [q, setQ] = useState("");
+  const [role, setRole] = useState("");
+  useEffect(() => setRole(getSession()?.role ?? ""), []);
 
   const load = useCallback(() => {
     api<Incident[]>("/api/v1/incidents?limit=500").then((d) => { setRows(d); setError(""); }).catch((e) => setError(String(e.message)));
@@ -48,9 +50,11 @@ export default function Queue() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Incident queue</h1>
-        <button className="btn border-emerald-600 text-emerald-300" onClick={simulate} disabled={busy}>
-          {busy ? "Running…" : "Run Simulation"}
-        </button>
+        {role === "admin" && (
+          <button className="btn border-emerald-600 text-emerald-300" onClick={simulate} disabled={busy}>
+            {busy ? "Running…" : "Run Simulation"}
+          </button>
+        )}
       </div>
       {error && <Err msg={error} />}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -88,7 +92,7 @@ export default function Queue() {
                 <td className="td whitespace-nowrap text-zinc-400">{fmt(r.last_seen)}</td>
               </tr>
             ))}
-            {!shown.length && <tr><td colSpan={6} className="td text-center text-zinc-500">No incidents. Click “Run Simulation”.</td></tr>}
+            {!shown.length && <tr><td colSpan={6} className="td text-center text-zinc-500">No incidents. Ask an admin to run the simulation, or ingest alerts with the API key.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -3,7 +3,8 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{tempfile.mkdtemp()}/test.db"
-os.environ["LLM_PROVIDER"] = "mock"
+os.environ.update(LLM_PROVIDER="mock", INGEST_API_KEY="test-key", JWT_SECRET="test-secret-test-secret-test-secret",
+                  ADMIN_PASSWORD="admin-pass", ANALYST_PASSWORD="analyst-pass")
 
 import httpx
 import pytest
@@ -11,7 +12,8 @@ from pydantic import ValidationError
 
 from app import triage as triage_mod
 from app.config import settings
-from app.db import engine, init_db
+from app.auth import seed_users
+from app.db import SessionLocal, engine, init_db, migrate
 from app.enrichment import classify_ip, extract_iocs
 from app.main import app
 from app.models import Alert, Base
@@ -23,7 +25,11 @@ async def client():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await init_db()
+    async with SessionLocal() as session:
+        await seed_users(session)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        token = (await c.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass"})).json()["access_token"]
+        c.headers.update({"X-API-Key": "test-key", "Authorization": f"Bearer {token}"})
         yield c
     await engine.dispose()
 
@@ -114,5 +120,50 @@ async def test_incident_action_writes_audit(client):
     r = await client.post(f"/api/v1/incidents/{inc}/action", json={"action": "false_positive", "note": "known scanner"})
     assert r.json()["status"] == "false_positive"
     log = (await client.get("/api/v1/audit")).json()[0]
-    assert log["action"] == "incident.false_positive" and log["note"] == "known scanner" and log["target_id"] == inc
+    assert log["action"] == "incident.false_positive" and log["note"] == "known scanner" and log["target_id"] == inc and log["actor"] == "admin"
     assert (await client.post(f"/api/v1/incidents/{inc}/action", json={"action": "nuke"})).status_code == 422
+
+
+async def test_auth_required_and_roles(client):
+    anon = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    async with anon:
+        assert (await anon.post("/api/v1/alerts/ingest", json=_alert())).status_code == 401
+        bad = await anon.post("/api/v1/alerts/ingest", json=_alert(), headers={"X-API-Key": "nope"})
+        assert bad.status_code == 401
+        assert (await anon.get("/api/v1/incidents")).status_code == 401
+        assert (await anon.post("/api/v1/auth/login", json={"username": "admin", "password": "wrong"})).status_code == 401
+        assert (await anon.get("/api/v1/health")).status_code == 200
+        analyst = (await anon.post("/api/v1/auth/login", json={"username": "analyst", "password": "analyst-pass"})).json()
+        hdr = {"Authorization": f"Bearer {analyst['access_token']}"}
+        assert analyst["role"] == "analyst"
+        assert (await anon.get("/api/v1/incidents", headers=hdr)).status_code == 200
+        assert (await anon.post("/api/v1/simulator/replay", headers=hdr)).status_code == 403
+        assert (await anon.post("/api/v1/alerts/ingest", json=_alert(), headers=hdr)).status_code == 401  # JWT is not an API key
+
+
+async def test_dedup_folds_repeats(client):
+    payload = _alert("Port scan", user="dup-user", host="H7")
+    last = None
+    for _ in range(50):
+        last = (await client.post("/api/v1/alerts/ingest", json=payload)).json()
+    assert last["duplicates"] == 1 and last["alerts"][0]["dup_count"] == 50
+    batch = (await client.post("/api/v1/alerts/ingest", json={"alerts": [payload, payload]})).json()
+    assert batch["accepted"] == 2 and batch["duplicates"] == 2 and batch["alerts"][0]["dup_count"] == 52
+    assert len((await client.get("/api/v1/incidents")).json()) == 1
+    other = (await client.post("/api/v1/alerts/ingest", json=_alert("Port scan", user="dup-user", host="H8"))).json()
+    assert other["duplicates"] == 0  # different entities -> different fingerprint
+    far = (await client.post("/api/v1/alerts/ingest", json=_alert("Port scan", user="dup-user", host="H7", minutes=600))).json()
+    assert far["duplicates"] == 0  # outside the dedup window
+
+
+async def test_migrations_build_schema_matching_models(tmp_path, monkeypatch):
+    import sqlite3
+    from alembic import command
+    from app.db import alembic_config
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite+aiosqlite:///{tmp_path}/m.db")
+    await migrate()
+    tables = {r[0] for r in sqlite3.connect(tmp_path / "m.db").execute("select name from sqlite_master where type='table'")}
+    assert {"alerts", "incidents", "users", "audit_logs", "alembic_version"} <= tables
+    import asyncio
+    await asyncio.to_thread(command.check, alembic_config())  # raises if models drifted from migrations

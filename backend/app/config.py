@@ -17,6 +17,17 @@ class Settings(BaseSettings):
     abuseipdb_api_key: str = ""
     intel_timeout_seconds: float = 3.0
     llm_timeout_seconds: float = 30.0
+    dedup_window_minutes: int = 60
+    auto_migrate: bool = True
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Auth: blank secrets are generated at startup and logged once.
+    ingest_api_key: str = ""
+    jwt_secret: str = ""
+    jwt_expire_minutes: int = 480
+    admin_username: str = "admin"
+    admin_password: str = ""
+    analyst_username: str = "analyst"
+    analyst_password: str = ""
 
     @property
     def database_backend(self) -> str:
