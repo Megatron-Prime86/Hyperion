@@ -107,3 +107,12 @@ async def test_llm_path_validates_wraps_and_falls_back(client, monkeypatch):
     monkeypatch.setattr(triage_mod, "_call_llm", fine)
     resp = (await client.post("/api/v1/alerts/ingest", json=_alert(user="ok-user"))).json()["alerts"][0]
     assert (await client.get(f"/api/v1/incidents/{resp['incident_id']}")).json()["triage"]["provider"] == "openai"
+
+
+async def test_incident_action_writes_audit(client):
+    inc = (await client.post("/api/v1/alerts/ingest", json=_alert(user="act"))).json()["alerts"][0]["incident_id"]
+    r = await client.post(f"/api/v1/incidents/{inc}/action", json={"action": "false_positive", "note": "known scanner"})
+    assert r.json()["status"] == "false_positive"
+    log = (await client.get("/api/v1/audit")).json()[0]
+    assert log["action"] == "incident.false_positive" and log["note"] == "known scanner" and log["target_id"] == inc
+    assert (await client.post(f"/api/v1/incidents/{inc}/action", json={"action": "nuke"})).status_code == 422

@@ -15,7 +15,7 @@ from app.db import get_session, init_db
 from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, utcnow
 from app.pipeline import dispatch
 from app.schemas import (
-    AlertIn, AlertOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, ReplayResult, TriageReportOut,
+    ActionIn, AlertIn, AlertOut, AuditOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, ReplayResult, TriageReportOut,
 )
 from app.simulator import replay_alerts
 
@@ -196,3 +196,28 @@ async def incident_detail(incident_id: uuid.UUID, session: AsyncSession = Depend
         enrichments=[EnrichmentOut.model_validate(e) for e in enrichments],
         triage=TriageReportOut.model_validate(report) if report else None,
     )
+
+
+ACTION_STATUS = {"acknowledge": "acknowledged", "escalate": "escalated", "false_positive": "false_positive", "resolve": "resolved"}
+
+
+@app.post("/api/v1/incidents/{incident_id}/action", response_model=IncidentOut)
+async def incident_action(incident_id: uuid.UUID, body: ActionIn, session: AsyncSession = Depends(get_session)) -> Incident:
+    incident = await session.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    previous, incident.status = incident.status, ACTION_STATUS[body.action]
+    incident.updated_at = utcnow()
+    session.add(
+        AuditLog(
+            actor=body.actor, action=f"incident.{body.action}", target_type="incident", target_id=str(incident_id),
+            note=body.note, detail={"from": previous, "to": incident.status, "risk_score": incident.risk_score},
+        )
+    )
+    await session.commit()
+    return incident
+
+
+@app.get("/api/v1/audit", response_model=list[AuditOut])
+async def audit(limit: int = Query(50, ge=1, le=500), session: AsyncSession = Depends(get_session)) -> list[AuditLog]:
+    return list(await session.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)))

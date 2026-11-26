@@ -136,3 +136,22 @@ class IncidentDetail(IncidentOut):
     alerts: list[AlertOut]
     enrichments: list[EnrichmentOut]
     triage: TriageReportOut | None
+
+
+class ActionIn(BaseModel):
+    action: Literal["acknowledge", "escalate", "false_positive", "resolve"]
+    note: str | None = Field(default=None, max_length=2000)
+    actor: str = Field(default="analyst", min_length=1, max_length=128)
+
+
+class AuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    actor: str
+    action: str
+    target_type: str
+    target_id: str | None
+    note: str | None
+    detail: dict[str, Any]
+    created_at: datetime
