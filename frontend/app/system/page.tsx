@@ -1,18 +1,19 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, type Audit, type Health } from "../api";
+import { api, type Audit, type Health, type IntelSource } from "../api";
 import { Badge, Err, fmt } from "../ui";
 
 export default function System() {
   const [h, setH] = useState<Health | null>(null);
   const [logs, setLogs] = useState<Audit[]>([]);
+  const [intel, setIntel] = useState<IntelSource[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () => {
-      Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100")])
-        .then(([a, b]) => { setH(a); setLogs(b); setError(""); })
+      Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100"), api<IntelSource[]>("/api/v1/intel/status")])
+        .then(([a, b, c]) => { setH(a); setLogs(b); setIntel(c); setError(""); })
         .catch((e) => setError(String(e.message)));
     };
     load();
@@ -39,6 +40,20 @@ export default function System() {
           </div>
         ))}
       </div>
+      <h2 className="pt-2 font-semibold">Threat intel sources</h2>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        {intel.map((i) => (
+          <div key={i.source} className="card space-y-1">
+            <div className="font-mono text-sm">{i.source}</div>
+            <Badge tone={!i.configured ? "" : i.cooldown_until && new Date(i.cooldown_until) > new Date() ? "high" : i.ok ? "live" : "high"}>
+              {!i.configured ? "no key" : i.cooldown_until && new Date(i.cooldown_until) > new Date() ? "cooling down" : i.ok ? "ok" : "error"}
+            </Badge>
+            <div className="text-xs text-zinc-500">{i.lookups} lookups · {i.cache_entries} cached</div>
+            {i.last_error && <div className="truncate text-xs text-red-300" title={i.last_error}>{i.last_error}</div>}
+          </div>
+        ))}
+      </div>
+      <h2 className="pt-2 font-semibold">Audit log</h2>
       <div className="card overflow-x-auto p-0">
         <table className="w-full">
           <thead className="border-b border-zinc-800">

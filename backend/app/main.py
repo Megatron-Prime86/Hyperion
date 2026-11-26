@@ -15,6 +15,8 @@ from app.auth import (
     Principal, check_throttle, current_user, ensure_secrets, make_token, record_failure, require_admin, require_api_key,
     seed_users, verify_password,
 )
+from app import intel
+from app.adapters import ADAPTERS, PACKS, load_pack, records
 from app.config import settings
 from app.db import SessionLocal, get_session, init_db, migrate
 from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, User, aware, utcnow
@@ -180,20 +182,39 @@ async def health() -> HealthOut:
     )
 
 
-@app.post("/api/v1/alerts/ingest", response_model=IngestResult)
-async def ingest(request: Request, _: None = Depends(require_api_key), session: AsyncSession = Depends(get_session)) -> IngestResult:
+async def _ingest(request: Request, session: AsyncSession, source: str | None) -> IngestResult:
     try:
         body = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON") from exc
-    alerts = _parse(body)
-    rows, folded = await _store(session, alerts, action="alert.ingest", actor="api-key")
+    alerts = _parse(records(source, body) if source else body)
+    rows, folded = await _store(session, alerts, action=f"alert.ingest.{source or 'generic'}", actor="api-key")
     return IngestResult(accepted=len(alerts), duplicates=folded, alerts=[_out(row) for row in rows])
 
 
+@app.post("/api/v1/alerts/ingest", response_model=IngestResult)
+async def ingest(request: Request, _: None = Depends(require_api_key), session: AsyncSession = Depends(get_session)) -> IngestResult:
+    return await _ingest(request, session, None)
+
+
+@app.post("/api/v1/alerts/ingest/{source}", response_model=IngestResult)
+async def ingest_source(
+    source: str, request: Request, _: None = Depends(require_api_key), session: AsyncSession = Depends(get_session)
+) -> IngestResult:
+    if source not in ADAPTERS:
+        raise HTTPException(status_code=404, detail=f"Unknown source '{source}'. Available: {', '.join(ADAPTERS)}")
+    return await _ingest(request, session, source)
+
+
 @app.post("/api/v1/simulator/replay", response_model=ReplayResult)
-async def replay(admin: Principal = Depends(require_admin), session: AsyncSession = Depends(get_session)) -> ReplayResult:
-    payloads = replay_alerts()
+async def replay(
+    pack: str = Query("builtin", description="builtin | wazuh | cloudtrail"),
+    admin: Principal = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> ReplayResult:
+    if pack != "builtin" and pack not in PACKS:
+        raise HTTPException(status_code=404, detail=f"Unknown pack. Available: builtin, {', '.join(PACKS)}")
+    payloads = replay_alerts() if pack == "builtin" else load_pack(pack)
     alerts = _parse(payloads)
     rows, _ = await _store(session, alerts, action="simulator.replay", actor=admin.username, dedup=False)
     scenarios: dict[str, int] = {}
@@ -277,3 +298,8 @@ async def login(body: LoginIn, request: Request, session: AsyncSession = Depends
         record_failure(key)
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return TokenOut(access_token=make_token(user.username, user.role), username=user.username, role=user.role)
+
+
+@app.get("/api/v1/intel/status")
+async def intel_status(_: Principal = Depends(current_user), session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    return await intel.status(session)

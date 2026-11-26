@@ -71,7 +71,7 @@ async def process_alerts(session: AsyncSession, alert_ids: list[uuid.UUID]) -> l
     alerts.sort(key=lambda a: aware(a.event_time))
     for alert in alerts:  # 1. enrich
         if not await session.scalar(select(Enrichment.id).where(Enrichment.alert_id == alert.id)):
-            session.add(Enrichment(alert_id=alert.id, **await enrich(alert)))
+            session.add(Enrichment(alert_id=alert.id, **await enrich(alert, session)))
     await session.flush()
     touched: dict[uuid.UUID, Incident] = {}
     for alert in alerts:  # 2. correlate

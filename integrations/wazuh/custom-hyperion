@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Wazuh custom integration: forwards each alert to Hyperion.
+
+Install on the Wazuh manager:
+  cp custom-hyperion /var/ossec/integrations/ && chown root:wazuh /var/ossec/integrations/custom-hyperion
+  chmod 750 /var/ossec/integrations/custom-hyperion
+Then add to /var/ossec/etc/ossec.conf and restart wazuh-manager (see README).
+Wazuh calls:  custom-hyperion <alert_file> <api_key> <hook_url>
+"""
+import json
+import sys
+import urllib.request
+
+
+def main() -> int:
+    alert_file, api_key, hook_url = sys.argv[1:4]
+    with open(alert_file, encoding="utf-8") as fh:
+        alert = json.load(fh)
+    req = urllib.request.Request(
+        hook_url, data=json.dumps(alert).encode(), method="POST",
+        headers={"Content-Type": "application/json", "X-API-Key": api_key},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return 0 if resp.status < 300 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

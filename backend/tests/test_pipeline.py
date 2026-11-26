@@ -167,3 +167,91 @@ async def test_migrations_build_schema_matching_models(tmp_path, monkeypatch):
     assert {"alerts", "incidents", "users", "audit_logs", "alembic_version"} <= tables
     import asyncio
     await asyncio.to_thread(command.check, alembic_config())  # raises if models drifted from migrations
+
+
+# ---- Phase 5: adapters, sample packs, live intel ----
+from app import intel
+from app.adapters import wazuh_to_alert
+
+WAZUH = {"id": "1.1", "timestamp": "2026-11-24T09:40:02.113+0000", "rule": {"id": "5712", "level": 10, "description": "sshd: brute force",
+         "mitre": {"id": ["T1110"], "tactic": ["Credential Access"], "technique": ["Brute Force"]}},
+         "agent": {"name": "web-01"}, "data": {"srcip": "-", "dstuser": "WKSTN-1$", "win": {"eventdata": {"ipAddress": "198.51.100.9"}}},
+         "full_log": "x", "syscheck": {"path": "/tmp/a", "event": "added", "sha256_after": "a" * 64}}
+
+
+def test_wazuh_adapter_normalizes():
+    a = wazuh_to_alert(WAZUH)
+    assert (a["severity"], a["host"], a["source"], a["external_id"]) == ("high", "web-01", "wazuh", "1.1")
+    assert a["src_ip"] == "198.51.100.9" and a["user"] is None and a["file_hash"] == "a" * 64
+    assert a["event_time"].startswith("2026-11-24T09:40:02") and "/tmp/a" in a["description"]
+    assert wazuh_to_alert({"rule": "garbage", "data": [1]})["title"].startswith("Wazuh rule")  # hostile shapes don't crash
+
+
+async def test_wazuh_webhook_uses_rule_mitre(client):
+    anon = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    async with anon:
+        assert (await anon.post("/api/v1/alerts/ingest/wazuh", json=WAZUH)).status_code == 401
+    assert (await client.post("/api/v1/alerts/ingest/splunk", json=WAZUH)).status_code == 404
+    res = (await client.post("/api/v1/alerts/ingest/wazuh", json=WAZUH)).json()
+    detail = (await client.get(f"/api/v1/incidents/{res['alerts'][0]['incident_id']}")).json()
+    assert "T1110" in {t["id"] for e in detail["enrichments"] for t in e["mitre"]["techniques"]}
+
+
+async def test_replay_sample_packs(client):
+    assert (await client.post("/api/v1/simulator/replay?pack=nope")).status_code == 404
+    assert (await client.post("/api/v1/simulator/replay?pack=wazuh")).json()["seeded"] == 7
+    top = (await client.get("/api/v1/incidents")).json()[0]
+    assert top["alert_count"] == 6 and top["risk_tier"] in ("high", "critical")
+    detail = (await client.get(f"/api/v1/incidents/{top['id']}")).json()
+    assert any(h["source"] == "local-feed" and h["type"] == "hash" for e in detail["enrichments"] for h in e["threat_intel"]["hits"])
+    assert (await client.post("/api/v1/simulator/replay?pack=cloudtrail")).json()["seeded"] == 8
+    tactics = {t["tactic"] for i in (await client.get("/api/v1/incidents")).json() if "access key" in i["title"].lower() or i["alert_count"] == 7
+               for e in (await client.get(f"/api/v1/incidents/{i['id']}")).json()["enrichments"] for t in e["mitre"]["techniques"]}
+    assert {"Persistence", "Defense Evasion"} <= tactics
+
+
+def _vt(handler_calls, status=200, headers=None):
+    def handler(request: httpx.Request) -> httpx.Response:
+        handler_calls.append(str(request.url))
+        if status != 200:
+            return httpx.Response(status, headers=headers or {})
+        return httpx.Response(200, json={"data": {"attributes": {"last_analysis_stats": {"malicious": 12, "harmless": 50}}}})
+    return handler
+
+
+async def _threat_intel(client, **fields):
+    res = (await client.post("/api/v1/alerts/ingest", json=_alert(**fields))).json()
+    detail = (await client.get(f"/api/v1/incidents/{res['alerts'][0]['incident_id']}")).json()
+    return next(e["threat_intel"] for e in detail["enrichments"] if e["alert_id"] == res["alerts"][0]["id"])
+
+
+async def test_live_intel_cache_then_rate_limit_cooldown(client, monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(settings, "virustotal_api_key", "k")
+    monkeypatch.setattr(intel, "make_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_vt(calls))))
+    first = await _threat_intel(client, title="a", domain="evil-live.example", user="u-a")
+    assert [h["source"] for h in first["hits"]] == ["virustotal"] and first["worst"] == "malicious" and len(calls) == 1
+    second = await _threat_intel(client, title="b", domain="evil-live.example", user="u-b")
+    assert second["cache_hits"] == 1 and len(calls) == 1  # served from the DB cache
+
+    limited: list[str] = []
+    monkeypatch.setattr(intel, "make_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_vt(limited, 429, {"retry-after": "120"}))))
+    third = await _threat_intel(client, title="c", domain="other.example", user="u-c")
+    assert third["hits"] == [] and len(limited) == 1  # pipeline still succeeded
+    vt = next(s for s in (await client.get("/api/v1/intel/status")).json() if s["source"] == "virustotal")
+    assert vt["ok"] is False and vt["cooldown_until"] and vt["cache_entries"] == 1
+    await _threat_intel(client, title="d", domain="third.example", user="u-d")
+    assert len(limited) == 1  # cooling down: no further calls
+
+
+async def test_network_down_keeps_local_feed(client, monkeypatch):
+    def boom(request):
+        raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(settings, "virustotal_api_key", "k")
+    monkeypatch.setattr(intel, "make_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(boom)))
+    ti = await _threat_intel(client, title="x", dst_ip="185.220.101.42", domain="nowhere.example", user="u-n")
+    assert ti["worst"] == "malicious" and ti["hits"][0]["source"] == "local-feed"
+    status = {s["source"]: s for s in (await client.get("/api/v1/intel/status")).json()}
+    assert status["virustotal"]["ok"] is False and "ConnectError" in status["virustotal"]["last_error"]
+    assert status["otx"]["configured"] is False

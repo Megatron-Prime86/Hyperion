@@ -36,6 +36,27 @@ docker compose logs api | grep -i generated      # if you left secrets blank
 
 `POST /api/v1/auth/login` with `{"username","password"}`. Failed logins are throttled (5 per minute per user and IP). The analyst account exists only when `ANALYST_PASSWORD` is set. The audit log records the signed-in username.
 
+## Real alert sources
+
+`POST /api/v1/alerts/ingest/{source}` (API key) normalises vendor formats: `wazuh` (one alert, a list, or `{"alerts":[...]}`) and `cloudtrail` (one record, a list, or `{"Records":[...]}`). Wazuh `rule.level` maps to severity and `rule.mitre` is used directly; hostile or malformed fields are ignored, not trusted. Add a source by writing one function in `app/adapters.py`.
+
+Wazuh integration (not tested against a live manager): copy `integrations/wazuh/custom-hyperion` to `/var/ossec/integrations/` (owner `root:wazuh`, mode `750`) and add to `ossec.conf`:
+```xml
+<integration>
+  <name>custom-hyperion</name>
+  <hook_url>http://HYPERION_HOST:8000/api/v1/alerts/ingest/wazuh</hook_url>
+  <api_key>YOUR_INGEST_API_KEY</api_key>
+  <level>3</level>
+  <alert_format>json</alert_format>
+</integration>
+```
+
+Sample packs (recorded Wazuh SSH brute-force-to-root chain, CloudTrail account takeover) replay with times re-based to now: pick a pack next to **Run Simulation** (admin), or `POST /api/v1/simulator/replay?pack=wazuh|cloudtrail|builtin`.
+
+## Live threat intel
+
+Set any of `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `OTX_API_KEY`, `URLHAUS_API_KEY`. External IPs, domains and hashes are looked up (max `INTEL_MAX_LOOKUPS` per alert), cached in the database for `INTEL_CACHE_HOURS`, and skipped while a source is cooling down after a rate limit (429 honours `Retry-After`) or an auth error. Network or provider failures never fail the pipeline; the built-in local feed keeps working offline. Source health is on the **System & Audit** page and `GET /api/v1/intel/status`. Verdict thresholds are heuristics (e.g. VirusTotal: 3+ malicious engines = malicious).
+
 ## Database migrations (Alembic)
 
 ```bash

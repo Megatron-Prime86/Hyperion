@@ -14,6 +14,7 @@ export default function Queue() {
   const [tier, setTier] = useState("");
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
+  const [pack, setPack] = useState("builtin");
   useEffect(() => setRole(getSession()?.role ?? ""), []);
 
   const load = useCallback(() => {
@@ -27,7 +28,7 @@ export default function Queue() {
 
   async function simulate() {
     setBusy(true);
-    try { await api("/api/v1/simulator/replay", { method: "POST" }); load(); }
+    try { await api(`/api/v1/simulator/replay?pack=${pack}`, { method: "POST" }); load(); }
     catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
   }
@@ -51,9 +52,16 @@ export default function Queue() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Incident queue</h1>
         {role === "admin" && (
-          <button className="btn border-emerald-600 text-emerald-300" onClick={simulate} disabled={busy}>
-            {busy ? "Running…" : "Run Simulation"}
-          </button>
+          <div className="flex gap-2">
+            <select className="input" value={pack} onChange={(e) => setPack(e.target.value)} aria-label="Sample pack">
+              <option value="builtin">Built-in scenarios</option>
+              <option value="wazuh">Wazuh sample pack</option>
+              <option value="cloudtrail">CloudTrail sample pack</option>
+            </select>
+            <button className="btn border-emerald-600 text-emerald-300" onClick={simulate} disabled={busy}>
+              {busy ? "Running…" : "Run Simulation"}
+            </button>
+          </div>
         )}
       </div>
       {error && <Err msg={error} />}

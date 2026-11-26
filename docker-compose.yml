@@ -36,6 +36,9 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      OTX_API_KEY: ${OTX_API_KEY:-}
+      URLHAUS_API_KEY: ${URLHAUS_API_KEY:-}
       # Blank = generated at startup and printed once: docker compose logs api | grep -i generated
       INGEST_API_KEY: ${INGEST_API_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-}

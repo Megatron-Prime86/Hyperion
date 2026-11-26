@@ -24,6 +24,10 @@ export type Triage = {
 };
 export type IncidentDetail = Incident & { alerts: Alert[]; enrichments: Enrichment[]; triage: Triage | null };
 export type Health = { status: string; database: string; llm_mode: string; redis_fallback: boolean };
+export type IntelSource = {
+  source: string; configured: boolean; ok: boolean; last_error: string | null; last_ok_at: string | null;
+  cooldown_until: string | null; lookups: number; cache_entries: number;
+};
 export type Audit = {
   id: string; actor: string; action: string; target_type: string; target_id: string | null;
   note: string | null; detail: Record<string, unknown>; created_at: string;
