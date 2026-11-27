@@ -1,0 +1,251 @@
+[
+ {
+  "id": "1763990400.1001",
+  "timestamp": "2026-11-24T09:40:02.113+0000",
+  "rule": {
+   "id": "5710",
+   "level": 5,
+   "description": "sshd: Attempt to login using a non-existent user",
+   "groups": [
+    "authentication_failed",
+    "sshd"
+   ],
+   "mitre": {
+    "id": [
+     "T1110"
+    ],
+    "tactic": [
+     "Credential Access"
+    ],
+    "technique": [
+     "Brute Force"
+    ]
+   }
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:40:02 web-01 sshd[2211]: Failed password for invalid user admin from 185.220.101.42 port 51514 ssh2",
+  "data": {
+   "srcip": "185.220.101.42",
+   "srcuser": "admin"
+  },
+  "location": "/var/log/auth.log"
+ },
+ {
+  "id": "1763990460.1002",
+  "timestamp": "2026-11-24T09:41:10.540+0000",
+  "rule": {
+   "id": "5712",
+   "level": 10,
+   "description": "sshd: brute force trying to get access to the system. Non existent user.",
+   "groups": [
+    "authentication_failures",
+    "sshd"
+   ],
+   "mitre": {
+    "id": [
+     "T1110"
+    ],
+    "tactic": [
+     "Credential Access"
+    ],
+    "technique": [
+     "Brute Force"
+    ]
+   }
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:41:10 web-01 sshd[2215]: Failed password for root from 185.220.101.42 port 51530 ssh2",
+  "data": {
+   "srcip": "185.220.101.42",
+   "srcuser": "root"
+  },
+  "location": "/var/log/auth.log"
+ },
+ {
+  "id": "1763990520.1003",
+  "timestamp": "2026-11-24T09:42:31.007+0000",
+  "rule": {
+   "id": "5712",
+   "level": 10,
+   "description": "sshd: brute force trying to get access to the system. Authentication failed.",
+   "groups": [
+    "authentication_failures",
+    "sshd"
+   ],
+   "mitre": {
+    "id": [
+     "T1110"
+    ],
+    "tactic": [
+     "Credential Access"
+    ],
+    "technique": [
+     "Brute Force"
+    ]
+   }
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:42:31 web-01 sshd[2230]: Failed password for deploy from 185.220.101.42 port 51602 ssh2",
+  "data": {
+   "srcip": "185.220.101.42",
+   "dstuser": "deploy"
+  },
+  "location": "/var/log/auth.log"
+ },
+ {
+  "id": "1763990580.1004",
+  "timestamp": "2026-11-24T09:43:44.250+0000",
+  "rule": {
+   "id": "5715",
+   "level": 3,
+   "description": "sshd: authentication success.",
+   "groups": [
+    "authentication_success",
+    "sshd"
+   ],
+   "mitre": {
+    "id": [
+     "T1078"
+    ],
+    "tactic": [
+     "Defense Evasion",
+     "Persistence",
+     "Privilege Escalation",
+     "Initial Access"
+    ],
+    "technique": [
+     "Valid Accounts"
+    ]
+   }
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:43:44 web-01 sshd[2241]: Accepted password for deploy from 185.220.101.42 port 51690 ssh2",
+  "data": {
+   "srcip": "185.220.101.42",
+   "dstuser": "deploy"
+  },
+  "location": "/var/log/auth.log"
+ },
+ {
+  "id": "1763990700.1005",
+  "timestamp": "2026-11-24T09:45:50.901+0000",
+  "rule": {
+   "id": "5402",
+   "level": 3,
+   "description": "Successful sudo to ROOT executed.",
+   "groups": [
+    "sudo"
+   ],
+   "mitre": {
+    "id": [
+     "T1548.003"
+    ],
+    "tactic": [
+     "Privilege Escalation",
+     "Defense Evasion"
+    ],
+    "technique": [
+     "Sudo and Sudo Caching"
+    ]
+   }
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:45:50 web-01 sudo: deploy : TTY=pts/0 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash",
+  "data": {
+   "srcuser": "deploy",
+   "dstuser": "root"
+  },
+  "location": "/var/log/auth.log"
+ },
+ {
+  "id": "1763990820.1006",
+  "timestamp": "2026-11-24T09:47:12.330+0000",
+  "rule": {
+   "id": "554",
+   "level": 5,
+   "description": "File added to the system.",
+   "groups": [
+    "ossec",
+    "syscheck",
+    "syscheck_entry_added"
+   ]
+  },
+  "agent": {
+   "id": "001",
+   "name": "web-01",
+   "ip": "10.20.0.15"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "",
+  "data": {},
+  "location": "/var/log/auth.log",
+  "syscheck": {
+   "path": "/tmp/.cache/update.bin",
+   "event": "added",
+   "sha256_after": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  }
+ },
+ {
+  "id": "1763990880.1007",
+  "timestamp": "2026-11-24T09:48:20.120+0000",
+  "rule": {
+   "id": "5501",
+   "level": 3,
+   "description": "PAM: Login session opened.",
+   "groups": [
+    "pam",
+    "syslog"
+   ]
+  },
+  "agent": {
+   "id": "001",
+   "name": "db-01",
+   "ip": "10.20.0.30"
+  },
+  "manager": {
+   "name": "wazuh-manager"
+  },
+  "full_log": "Nov 24 09:48:20 db-01 systemd-logind: New session 42 of user ops.",
+  "data": {
+   "dstuser": "ops"
+  },
+  "location": "/var/log/auth.log"
+ }
+]

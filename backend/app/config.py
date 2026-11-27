@@ -14,6 +14,25 @@ class Settings(BaseSettings):
     anthropic_base_url: str = "https://api.anthropic.com"
     llm_model: str = ""
     correlation_window_minutes: int = 30
+    abuseipdb_api_key: str = ""
+    virustotal_api_key: str = ""
+    otx_api_key: str = ""
+    urlhaus_api_key: str = ""
+    intel_timeout_seconds: float = 5.0
+    intel_cache_hours: int = 24
+    intel_max_lookups: int = 8  # live indicators looked up per alert (quota guard)
+    llm_timeout_seconds: float = 30.0
+    dedup_window_minutes: int = 60
+    auto_migrate: bool = True
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Auth: blank secrets are generated at startup and logged once.
+    ingest_api_key: str = ""
+    jwt_secret: str = ""
+    jwt_expire_minutes: int = 480
+    admin_username: str = "admin"
+    admin_password: str = ""
+    analyst_username: str = "analyst"
+    analyst_password: str = ""
 
     @property
     def database_backend(self) -> str:

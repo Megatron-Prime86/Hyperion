@@ -1,0 +1,146 @@
+{
+ "Records": [
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:10:01Z",
+   "eventSource": "signin.amazonaws.com",
+   "eventName": "ConsoleLogin",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-1",
+   "errorMessage": "Failed authentication",
+   "responseElements": {
+    "ConsoleLogin": "Failure"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:10:40Z",
+   "eventSource": "signin.amazonaws.com",
+   "eventName": "ConsoleLogin",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-2",
+   "errorMessage": "Failed authentication",
+   "responseElements": {
+    "ConsoleLogin": "Failure"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:11:20Z",
+   "eventSource": "signin.amazonaws.com",
+   "eventName": "ConsoleLogin",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-3",
+   "errorMessage": "Failed authentication",
+   "responseElements": {
+    "ConsoleLogin": "Failure"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:12:05Z",
+   "eventSource": "signin.amazonaws.com",
+   "eventName": "ConsoleLogin",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-4",
+   "responseElements": {
+    "ConsoleLogin": "Success"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:14:30Z",
+   "eventSource": "iam.amazonaws.com",
+   "eventName": "CreateAccessKey",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-5"
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:16:02Z",
+   "eventSource": "iam.amazonaws.com",
+   "eventName": "AttachUserPolicy",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-6",
+   "requestParameters": {
+    "userName": "dev.ops",
+    "policyArn": "arn:aws:iam::aws:policy/AdministratorAccess"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:18:44Z",
+   "eventSource": "iam.amazonaws.com",
+   "eventName": "StopLogging",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "203.0.113.77",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "dev.ops",
+    "arn": "arn:aws:iam::123456789012:user/dev.ops"
+   },
+   "eventID": "ct-7",
+   "requestParameters": {
+    "name": "management-events"
+   }
+  },
+  {
+   "eventVersion": "1.09",
+   "eventTime": "2026-11-24T08:20:00Z",
+   "eventSource": "iam.amazonaws.com",
+   "eventName": "DescribeInstances",
+   "awsRegion": "us-east-1",
+   "sourceIPAddress": "10.1.2.3",
+   "userAgent": "Mozilla/5.0",
+   "userIdentity": {
+    "type": "IAMUser",
+    "userName": "svc-ci",
+    "arn": "arn:aws:iam::123456789012:user/svc-ci"
+   },
+   "eventID": "ct-8"
+  }
+ ]
+}

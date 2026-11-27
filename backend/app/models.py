@@ -1,12 +1,16 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # SQLite drops tzinfo
 
 
 class Base(DeclarativeBase):
@@ -50,6 +54,9 @@ class Alert(Base):
     domain: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     raw: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    dup_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -100,3 +107,38 @@ class AuditLog(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default="analyst", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class IntelCache(Base):
+    __tablename__ = "intel_cache"
+    __table_args__ = (UniqueConstraint("source", "indicator", name="uq_intel_source_indicator"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    indicator: Mapped[str] = mapped_column(String(512), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class IntelHealth(Base):
+    __tablename__ = "intel_health"
+
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ok: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_ok_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lookups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
