@@ -55,6 +55,7 @@ class Alert(Base):
     file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     raw: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    rule_key: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     dup_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     incident_id: Mapped[uuid.UUID | None] = mapped_column(

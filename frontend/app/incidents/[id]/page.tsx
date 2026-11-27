@@ -89,6 +89,21 @@ export default function IncidentPage() {
             {!!tactics.length && <div className="mt-3 flex flex-wrap gap-1.5">{tactics.map((x) => <Badge key={x} tone="info">{x}</Badge>)}</div>}
           </section>
 
+          {!!d.similar.length && (
+            <section className="card">
+              <h2 className="mb-2 font-semibold">Similar past incidents</h2>
+              <ul className="space-y-1.5 text-sm">
+                {d.similar.map((s) => (
+                  <li key={s.id} className="flex flex-wrap items-center gap-2">
+                    <Badge tone={s.status}>{label(s.status)}</Badge>
+                    <Link href={`/incidents/${s.id}`} className="text-emerald-300 hover:underline">{s.title}</Link>
+                    <span className="font-mono text-xs text-zinc-500">{Math.round(s.similarity * 100)}% match</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="card">
             <h2 className="mb-3 font-semibold">Alert timeline</h2>
             <ol className="space-y-4 border-l border-zinc-700 pl-4">

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     intel_max_lookups: int = 8  # live indicators looked up per alert (quota guard)
     llm_timeout_seconds: float = 30.0
     dedup_window_minutes: int = 60
+    # Analyst feedback loop: a rule analysts keep dismissing (or escalating) adjusts triage scores.
+    feedback_min_decisions: int = 3
+    feedback_ratio: float = 0.8
+    feedback_fp_penalty: int = 25
+    feedback_boost: int = 10
+    llm_max_deviation: int = 40  # LLM score may differ from the rule-based baseline by at most this much
     auto_migrate: bool = True
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     # Auth: blank secrets are generated at startup and logged once.

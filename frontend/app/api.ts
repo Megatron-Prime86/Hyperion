@@ -22,7 +22,11 @@ export type Triage = {
   risk_score: number; risk_tier: string; triage_verdict: string; executive_summary: string;
   evidence_highlights: string[]; recommended_next_steps: string[]; provider: string; model: string | null; created_at: string;
 };
-export type IncidentDetail = Incident & { alerts: Alert[]; enrichments: Enrichment[]; triage: Triage | null };
+export type Similar = { id: string; title: string; status: string; risk_score: number | null; similarity: number; last_seen: string };
+export type FeedbackRule = {
+  rule_key: string; title: string; false_positive: number; escalated: number; resolved: number; verdict: string | null;
+};
+export type IncidentDetail = Incident & { alerts: Alert[]; enrichments: Enrichment[]; triage: Triage | null; similar: Similar[] };
 export type Health = { status: string; database: string; llm_mode: string; redis_fallback: boolean };
 export type IntelSource = {
   source: string; configured: boolean; ok: boolean; last_error: string | null; last_ok_at: string | null;

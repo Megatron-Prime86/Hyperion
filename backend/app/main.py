@@ -15,14 +15,14 @@ from app.auth import (
     Principal, check_throttle, current_user, ensure_secrets, make_token, record_failure, require_admin, require_api_key,
     seed_users, verify_password,
 )
-from app import intel
+from app import feedback, intel
 from app.adapters import ADAPTERS, PACKS, load_pack, records
 from app.config import settings
 from app.db import SessionLocal, get_session, init_db, migrate
 from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, User, aware, utcnow
 from app.pipeline import dispatch
 from app.schemas import (
-    ActionIn, AlertIn, AlertOut, AuditOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, LoginIn, ReplayResult, TokenOut, TriageReportOut,
+    ActionIn, AlertIn, AlertOut, AuditOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, LoginIn, ReplayResult, SimilarIncident, TokenOut, TriageReportOut,
 )
 from app.simulator import replay_alerts
 
@@ -89,6 +89,7 @@ def _row(alert: AlertIn) -> Alert:
     when = aware(alert.event_time).astimezone(timezone.utc) if alert.event_time else datetime.now(timezone.utc)
     return Alert(
         fingerprint=_fingerprint(alert),
+        rule_key=feedback.rule_key(alert.source, alert.title),
         last_seen=when,
         external_id=alert.external_id,
         source=alert.source,
@@ -257,6 +258,7 @@ async def incident_detail(
         alerts=[_out(a) for a in alerts],
         enrichments=[EnrichmentOut.model_validate(e) for e in enrichments],
         triage=TriageReportOut.model_validate(report) if report else None,
+        similar=[SimilarIncident(**s) for s in await feedback.similar_incidents(session, incident)],
     )
 
 
@@ -303,3 +305,10 @@ async def login(body: LoginIn, request: Request, session: AsyncSession = Depends
 @app.get("/api/v1/intel/status")
 async def intel_status(_: Principal = Depends(current_user), session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
     return await intel.status(session)
+
+
+@app.get("/api/v1/feedback/rules")
+async def feedback_rules(_: Principal = Depends(current_user), session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    """Alert patterns with analyst decision counts; rules flagged likely_false_positive lower triage scores."""
+    stats = await feedback.rule_stats(session)
+    return sorted(stats.values(), key=lambda s: -(s["false_positive"] + s["escalated"] + s["resolved"]))

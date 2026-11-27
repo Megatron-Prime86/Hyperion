@@ -1,19 +1,20 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, type Audit, type Health, type IntelSource } from "../api";
+import { api, type Audit, type FeedbackRule, type Health, type IntelSource } from "../api";
 import { Badge, Err, fmt } from "../ui";
 
 export default function System() {
   const [h, setH] = useState<Health | null>(null);
   const [logs, setLogs] = useState<Audit[]>([]);
   const [intel, setIntel] = useState<IntelSource[]>([]);
+  const [rules, setRules] = useState<FeedbackRule[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const load = () => {
-      Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100"), api<IntelSource[]>("/api/v1/intel/status")])
-        .then(([a, b, c]) => { setH(a); setLogs(b); setIntel(c); setError(""); })
+      Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100"), api<IntelSource[]>("/api/v1/intel/status"), api<FeedbackRule[]>("/api/v1/feedback/rules")])
+        .then(([a, b, c, r]) => { setH(a); setLogs(b); setIntel(c); setRules(r); setError(""); })
         .catch((e) => setError(String(e.message)));
     };
     load();
@@ -52,6 +53,26 @@ export default function System() {
             {i.last_error && <div className="truncate text-xs text-red-300" title={i.last_error}>{i.last_error}</div>}
           </div>
         ))}
+      </div>
+      <h2 className="pt-2 font-semibold">Analyst feedback by alert pattern</h2>
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full">
+          <thead className="border-b border-zinc-800">
+            <tr>{["Pattern", "False positive", "Escalated", "Resolved", "Effect on scoring"].map((x) => <th key={x} className="th">{x}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/70">
+            {rules.map((r) => (
+              <tr key={r.rule_key}>
+                <td className="td">{r.title}</td>
+                <td className="td font-mono">{r.false_positive}</td>
+                <td className="td font-mono">{r.escalated}</td>
+                <td className="td font-mono">{r.resolved}</td>
+                <td className="td">{r.verdict ? <Badge tone={r.verdict === "likely_false_positive" ? "low" : "high"}>{r.verdict.replace(/_/g, " ")}</Badge> : <span className="text-zinc-500">none yet</span>}</td>
+              </tr>
+            ))}
+            {!rules.length && <tr><td colSpan={5} className="td text-center text-zinc-500">No analyst decisions yet. Mark incidents False Positive or Escalate to teach the scorer.</td></tr>}
+          </tbody>
+        </table>
       </div>
       <h2 className="pt-2 font-semibold">Audit log</h2>
       <div className="card overflow-x-auto p-0">

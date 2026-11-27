@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app import feedback
 from app.enrichment import enrich
 from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, aware, utcnow
 from app.triage import SEV_RANK, build_context, triage
@@ -84,7 +85,9 @@ async def process_alerts(session: AsyncSession, alert_ids: list[uuid.UUID]) -> l
         members = await refresh_incident(session, incident)
         enrichments = {e.alert_id: e for e in await session.scalars(
             select(Enrichment).where(Enrichment.alert_id.in_([a.id for a in members])))}
-        result, provider, model = await triage(build_context(incident, members, enrichments))
+        keys = {a.rule_key for a in members if a.rule_key}
+        stats = await feedback.rule_stats(session, keys) if keys else {}
+        result, provider, model = await triage(build_context(incident, members, enrichments, stats))
         session.add(TriageReport(incident_id=iid, provider=provider, model=model, **result.model_dump()))
         incident.risk_score, incident.risk_tier, incident.summary = result.risk_score, result.risk_tier, result.executive_summary
         incident.updated_at = utcnow()

@@ -135,7 +135,17 @@ class IncidentOut(BaseModel):
     last_seen: datetime
 
 
+class SimilarIncident(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+    risk_score: int | None
+    similarity: float
+    last_seen: datetime
+
+
 class IncidentDetail(IncidentOut):
+    similar: list[SimilarIncident] = []
     alerts: list[AlertOut]
     enrichments: list[EnrichmentOut]
     triage: TriageReportOut | None

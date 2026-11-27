@@ -57,6 +57,14 @@ Sample packs (recorded Wazuh SSH brute-force-to-root chain, CloudTrail account t
 
 Set any of `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `OTX_API_KEY`, `URLHAUS_API_KEY`. External IPs, domains and hashes are looked up (max `INTEL_MAX_LOOKUPS` per alert), cached in the database for `INTEL_CACHE_HOURS`, and skipped while a source is cooling down after a rate limit (429 honours `Retry-After`) or an auth error. Network or provider failures never fail the pipeline; the built-in local feed keeps working offline. Source health is on the **System & Audit** page and `GET /api/v1/intel/status`. Verdict thresholds are heuristics (e.g. VirusTotal: 3+ malicious engines = malicious).
 
+## AI quality
+
+**Feedback loop.** Every alert gets a `rule_key` (source + title with IPs, hashes and numbers masked). Each incident you mark False Positive or Escalate counts once toward every pattern it contains. When a pattern has `FEEDBACK_MIN_DECISIONS` decisions at a `FEEDBACK_RATIO` ratio, future incidents made only of dismissed patterns lose `FEEDBACK_FP_PENALTY` points (the verdict drops at most one step), and escalated patterns gain `FEEDBACK_BOOST`. The penalty is withheld when there is malicious threat intel, critical severity, a critical asset or 3+ MITRE tactics, and every adjustment is written into the evidence. Incident detail shows **Similar past incidents**; the System page lists decisions per pattern (`GET /api/v1/feedback/rules`). One mistaken decision on a multi-alert incident votes for every pattern in it, which is why the thresholds exist.
+
+**Evaluation harness.** `cd backend && uv run python -m app.evaluate` runs 30 labelled cases (benign, suspicious, malicious, injection text and deliberately hard ones) through the real pipeline on a throwaway database and prints accuracy, a confusion matrix, dangerous misses (attack called false positive), under-triaged attacks and false alarms. With `LLM_PROVIDER` set to a real provider it also reports LLM vs rule-based agreement, score drift, fallback rate and latency. Add `--json out.json` to save results and `--cases file.json` to use your own labelled set (cases must share a host, user or src_ip). The bundled set is small and written by hand, so treat its numbers as a regression gate for the wiring, not a benchmark; the value comes from adding your own labelled alerts.
+
+**Prompt-injection defences** (tested in `tests/test_quality.py`): alert fields are clipped, stripped of delimiter-like text and fenced by a per-call random nonce; model output is schema-validated; a model that contradicts malicious threat intel is rejected; and any model score more than `LLM_MAX_DEVIATION` points from the rule-based baseline is clamped to that bound (with the baseline verdict) and flagged in the evidence.
+
 ## Database migrations (Alembic)
 
 ```bash
