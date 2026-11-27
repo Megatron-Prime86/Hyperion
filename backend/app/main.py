@@ -6,6 +6,7 @@ from typing import Any
 import uuid
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -15,14 +16,14 @@ from app.auth import (
     Principal, check_throttle, current_user, ensure_secrets, make_token, record_failure, require_admin, require_api_key,
     seed_users, verify_password,
 )
-from app import feedback, intel
+from app import events, feedback, intel, notify, workflow
 from app.adapters import ADAPTERS, PACKS, load_pack, records
 from app.config import settings
 from app.db import SessionLocal, get_session, init_db, migrate
-from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, User, aware, utcnow
+from app.models import Alert, AuditLog, Enrichment, Incident, IncidentComment, PlaybookRun, TriageReport, User, aware, utcnow
 from app.pipeline import dispatch
 from app.schemas import (
-    ActionIn, AlertIn, AlertOut, AuditOut, EnrichmentOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, LoginIn, ReplayResult, SimilarIncident, TokenOut, TriageReportOut,
+    ActionIn, AlertIn, AlertOut, AssignIn, AuditOut, CommentIn, CommentOut, EnrichmentOut, PlaybookRunIn, PlaybookRunOut, UserOut, HealthOut, IncidentDetail, IncidentOut, IngestResult, LoginIn, ReplayResult, SimilarIncident, TokenOut, TriageReportOut,
 )
 from app.simulator import replay_alerts
 
@@ -259,6 +260,11 @@ async def incident_detail(
         enrichments=[EnrichmentOut.model_validate(e) for e in enrichments],
         triage=TriageReportOut.model_validate(report) if report else None,
         similar=[SimilarIncident(**s) for s in await feedback.similar_incidents(session, incident)],
+        comments=[CommentOut.model_validate(c) for c in await session.scalars(
+            select(IncidentComment).where(IncidentComment.incident_id == incident_id).order_by(IncidentComment.created_at))],
+        playbook_runs=[PlaybookRunOut.model_validate(r) for r in await session.scalars(
+            select(PlaybookRun).where(PlaybookRun.incident_id == incident_id).order_by(PlaybookRun.created_at.desc()).limit(50))],
+        playbooks=workflow.suggestions(alerts, enrichments),
     )
 
 
@@ -274,6 +280,9 @@ async def incident_action(
         raise HTTPException(status_code=404, detail="Incident not found")
     previous, incident.status = incident.status, ACTION_STATUS[body.action]
     incident.updated_at = utcnow()
+    incident.acknowledged_at = incident.acknowledged_at or incident.updated_at
+    if incident.status in ("resolved", "false_positive"):
+        incident.resolved_at = incident.updated_at
     session.add(
         AuditLog(
             actor=user.username, action=f"incident.{body.action}", target_type="incident", target_id=str(incident_id),
@@ -312,3 +321,83 @@ async def feedback_rules(_: Principal = Depends(current_user), session: AsyncSes
     """Alert patterns with analyst decision counts; rules flagged likely_false_positive lower triage scores."""
     stats = await feedback.rule_stats(session)
     return sorted(stats.values(), key=lambda s: -(s["false_positive"] + s["escalated"] + s["resolved"]))
+
+
+# ---------------- analyst workflow ----------------
+async def _get_incident(session: AsyncSession, incident_id: uuid.UUID) -> Incident:
+    incident = await session.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
+
+
+@app.get("/api/v1/users", response_model=list[UserOut])
+async def users(_: Principal = Depends(current_user), session: AsyncSession = Depends(get_session)) -> list[User]:
+    return list(await session.scalars(select(User).order_by(User.username)))
+
+
+@app.post("/api/v1/incidents/{incident_id}/assign", response_model=IncidentOut)
+async def assign(incident_id: uuid.UUID, body: AssignIn, user: Principal = Depends(current_user),
+                 session: AsyncSession = Depends(get_session)) -> Incident:
+    incident = await _get_incident(session, incident_id)
+    if body.assignee and not await session.scalar(select(User.id).where(User.username == body.assignee)):
+        raise HTTPException(status_code=422, detail="Unknown user")
+    previous, incident.assignee = incident.assignee, body.assignee or None
+    incident.updated_at = utcnow()
+    if incident.assignee:
+        incident.acknowledged_at = incident.acknowledged_at or incident.updated_at
+    session.add(AuditLog(actor=user.username, action="incident.assign", target_type="incident", target_id=str(incident_id),
+                         note=f"{previous or 'unassigned'} -> {incident.assignee or 'unassigned'}", detail={"from": previous, "to": incident.assignee}))
+    await session.commit()
+    return incident
+
+
+@app.post("/api/v1/incidents/{incident_id}/comments", response_model=CommentOut)
+async def add_comment(incident_id: uuid.UUID, body: CommentIn, user: Principal = Depends(current_user),
+                      session: AsyncSession = Depends(get_session)) -> IncidentComment:
+    incident = await _get_incident(session, incident_id)
+    comment = IncidentComment(incident_id=incident_id, author=user.username, body=body.body.strip())
+    session.add(comment)
+    incident.updated_at = utcnow()
+    session.add(AuditLog(actor=user.username, action="incident.comment", target_type="incident", target_id=str(incident_id),
+                         note=comment.body[:200]))
+    await session.commit()
+    await session.refresh(comment)
+    return comment
+
+
+@app.post("/api/v1/incidents/{incident_id}/playbooks/{playbook}", response_model=PlaybookRunOut)
+async def run_playbook(incident_id: uuid.UUID, playbook: str, body: PlaybookRunIn, user: Principal = Depends(current_user),
+                       session: AsyncSession = Depends(get_session)) -> PlaybookRun:
+    if not body.dry_run and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required to execute a playbook")
+    incident = await _get_incident(session, incident_id)
+    alerts = list(await session.scalars(select(Alert).where(Alert.incident_id == incident_id)))
+    enrichments = list(await session.scalars(select(Enrichment).where(Enrichment.alert_id.in_([a.id for a in alerts]))))
+    try:
+        return await workflow.run_playbook(session, incident, alerts, enrichments, playbook, body.target, body.dry_run, user.username)
+    except workflow.PlaybookError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@app.get("/api/v1/incidents/{incident_id}/export")
+async def export_incident(incident_id: uuid.UUID, user: Principal = Depends(current_user),
+                          session: AsyncSession = Depends(get_session)) -> PlainTextResponse:
+    detail = await incident_detail(incident_id, user, session)
+    trail = list(await session.scalars(select(AuditLog).where(AuditLog.target_id == str(incident_id)).order_by(AuditLog.created_at)))
+    return PlainTextResponse(workflow.incident_markdown(detail, trail), media_type="text/markdown; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="incident-{str(incident_id)[:8]}.md"'})
+
+
+@app.get("/api/v1/events")
+async def event_stream(request: Request, since: datetime | None = None, once: bool = False,
+                       _: Principal = Depends(current_user)) -> StreamingResponse:
+    """Server-sent events for incident changes. `once=true` returns after the first batch (curl, tests)."""
+    return StreamingResponse(events.stream(request, aware(since) if since else utcnow(), once), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/v1/notifications/test")
+async def test_notifications(admin: Principal = Depends(require_admin)) -> dict[str, object]:
+    results = await notify.notify_all("[Hyperion] test notification", f"Test sent by {admin.username}.")
+    return {"configured": notify.configured(), "results": results}

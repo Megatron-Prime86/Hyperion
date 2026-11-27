@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ACTIONS, api, type Enrichment, type IncidentDetail } from "../../api";
+import { ACTIONS, api, download, getSession, useEvents, type Enrichment, type IncidentDetail, type PlaybookRun, type UserRef } from "../../api";
 import { Badge, Err, fmt, label } from "../../ui";
 
 function IocBadges({ e }: { e?: Enrichment }) {
@@ -34,11 +34,34 @@ export default function IncidentPage() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
+  const [users, setUsers] = useState<UserRef[]>([]);
+  const [comment, setComment] = useState("");
+  const [pbMsg, setPbMsg] = useState("");
+  const session = getSession();
 
   const load = useCallback(() => {
     api<IncidentDetail>(`/api/v1/incidents/${id}`).then(setD).catch((e) => setError(String(e.message)));
   }, [id]);
   useEffect(load, [load]);
+  useEffect(() => { api<UserRef[]>("/api/v1/users").then(setUsers).catch(() => setUsers([])); }, []);
+  useEvents((e) => { if (e.id === id) load(); });
+
+  async function call(fn: () => Promise<unknown>, ok?: string) {
+    setBusy(true); setPbMsg("");
+    try { await fn(); if (ok) setDone(ok); load(); }
+    catch (e) { setError(String((e as Error).message)); }
+    finally { setBusy(false); }
+  }
+  const assign = (assignee: string | null) => call(() => api(`/api/v1/incidents/${id}/assign`, { method: "POST", body: JSON.stringify({ assignee }) }));
+  const addComment = () => call(async () => {
+    await api(`/api/v1/incidents/${id}/comments`, { method: "POST", body: JSON.stringify({ body: comment }) });
+    setComment("");
+  });
+  const runPlaybook = (playbook: string, target: string, dry_run: boolean) =>
+    call(async () => {
+      const r = await api<PlaybookRun>(`/api/v1/incidents/${id}/playbooks/${playbook}`, { method: "POST", body: JSON.stringify({ target, dry_run }) });
+      setPbMsg(`${label(playbook)} on ${target}: ${r.status.replace("_", " ")}`);
+    });
 
   async function act(action: string) {
     setBusy(true); setDone("");
@@ -67,6 +90,22 @@ export default function IncidentPage() {
           <Badge tone={d.risk_tier ?? ""}>{d.risk_score ?? "–"}/100 {d.risk_tier}</Badge>
           <Badge tone={d.status}>{label(d.status)}</Badge>
         </div>
+      </div>
+
+      <div className="card flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-2 text-zinc-400">
+          Assignee
+          <select className="input" value={d.assignee ?? ""} disabled={busy} onChange={(e) => assign(e.target.value || null)}>
+            <option value="">Unassigned</option>
+            {users.map((u) => <option key={u.username} value={u.username}>{u.username}</option>)}
+          </select>
+        </label>
+        {session && d.assignee !== session.username && <button className="btn" disabled={busy} onClick={() => assign(session.username)}>Assign to me</button>}
+        <span className="text-zinc-500">SLA</span>
+        <Badge tone={{ ok: "low", met: "low", due_soon: "medium", overdue: "critical", missed: "high" }[d.sla.ack_state]}>acknowledge {d.sla.ack_state.replace("_", " ")}</Badge>
+        <Badge tone={{ ok: "low", met: "low", due_soon: "medium", overdue: "critical", missed: "high" }[d.sla.resolve_state]}>resolve {d.sla.resolve_state.replace("_", " ")}</Badge>
+        <span className="font-mono text-xs text-zinc-500">due {fmt(d.sla.ack_due)} / {fmt(d.sla.resolve_due)}</span>
+        <button className="btn ml-auto" onClick={() => download(`/api/v1/incidents/${id}/export`, "incident.md").catch((e) => setError(String(e.message)))}>Export Markdown</button>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">
@@ -105,6 +144,43 @@ export default function IncidentPage() {
           )}
 
           <section className="card">
+            <h2 className="mb-1 font-semibold">Response playbooks</h2>
+            <p className="mb-3 text-xs text-zinc-500">Dry run shows what would happen and is audited. Executing is admin-only and disabled unless the server enables it.</p>
+            <ul className="space-y-2 text-sm">
+              {d.playbooks.map((p) => (
+                <li key={`${p.playbook}:${p.target}`} className="flex flex-wrap items-center gap-2">
+                  <span className="w-28 font-medium">{p.label}</span>
+                  <span className="font-mono text-xs">{p.target}</span>
+                  <span className="text-xs text-zinc-500">{p.allowed ? p.reason : p.blocked_reason}</span>
+                  {p.allowed && (
+                    <span className="ml-auto flex gap-2">
+                      <button className="btn" disabled={busy} onClick={() => runPlaybook(p.playbook, p.target, true)}>Dry run</button>
+                      {session?.role === "admin" && (
+                        <button className="btn border-red-500/60 text-red-300" disabled={busy}
+                          onClick={() => window.confirm(`Execute ${p.label} on ${p.target}?`) && runPlaybook(p.playbook, p.target, false)}>Execute</button>
+                      )}
+                    </span>
+                  )}
+                </li>
+              ))}
+              {!d.playbooks.length && <li className="text-zinc-500">No actionable entities in this incident.</li>}
+            </ul>
+            {pbMsg && <p className="mt-2 text-sm text-emerald-400">{pbMsg}</p>}
+            {!!d.playbook_runs.length && (
+              <div className="mt-3 space-y-1.5 border-t border-zinc-800 pt-3 text-xs">
+                {d.playbook_runs.map((r) => (
+                  <div key={r.id} className="flex flex-wrap items-center gap-2">
+                    <Badge tone={r.status === "executed" ? "high" : r.status === "failed" ? "critical" : r.status === "blocked" ? "medium" : ""}>{r.status.replace("_", " ")}</Badge>
+                    <span className="font-mono">{r.playbook} {r.target}</span>
+                    <span className="text-zinc-500">{r.actor} · {fmt(r.created_at)}</span>
+                    <span className="text-zinc-400">{String(r.result.would ?? r.result.reason ?? r.result.note ?? r.result.error ?? "")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="card">
             <h2 className="mb-3 font-semibold">Alert timeline</h2>
             <ol className="space-y-4 border-l border-zinc-700 pl-4">
               {d.alerts.map((a) => (
@@ -122,6 +198,17 @@ export default function IncidentPage() {
                 </li>
               ))}
             </ol>
+          </section>
+          <section className="card">
+            <h2 className="mb-3 font-semibold">Analyst notes</h2>
+            <ul className="mb-3 space-y-2 text-sm">
+              {d.comments.map((c) => (
+                <li key={c.id}><span className="font-mono text-xs text-zinc-500">{c.author} · {fmt(c.created_at)}</span><p className="whitespace-pre-wrap">{c.body}</p></li>
+              ))}
+              {!d.comments.length && <li className="text-zinc-500">No notes yet.</li>}
+            </ul>
+            <textarea className="input h-20 w-full" placeholder="Add a note for the next analyst" maxLength={4000} value={comment} onChange={(e) => setComment(e.target.value)} />
+            <button className="btn mt-2" disabled={busy || !comment.trim()} onClick={addComment}>Add note</button>
           </section>
         </div>
 

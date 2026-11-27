@@ -1,10 +1,18 @@
 "use client";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, getSession, type Incident } from "./api";
+import { api, getSession, useEvents, type Incident } from "./api";
 import { Badge, Err, fmt, label } from "./ui";
 
 const CLOSED = ["resolved", "false_positive"];
+
+function slaBadge(r: Incident) {
+  if (CLOSED.includes(r.status)) return <span className="text-zinc-600">—</span>;
+  const s = [r.sla.ack_state, r.sla.resolve_state];
+  if (s.includes("overdue")) return <Badge tone="critical">overdue</Badge>;
+  if (s.includes("due_soon")) return <Badge tone="medium">due soon</Badge>;
+  return <Badge tone="low">ok</Badge>;
+}
 
 export default function Queue() {
   const [rows, setRows] = useState<Incident[]>([]);
@@ -15,16 +23,23 @@ export default function Queue() {
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
   const [pack, setPack] = useState("builtin");
-  useEffect(() => setRole(getSession()?.role ?? ""), []);
+  const [me, setMe] = useState("");
+  const [mine, setMine] = useState(false);
+  const [flash, setFlash] = useState("");
+  useEffect(() => { setRole(getSession()?.role ?? ""); setMe(getSession()?.username ?? ""); }, []);
 
   const load = useCallback(() => {
     api<Incident[]>("/api/v1/incidents?limit=500").then((d) => { setRows(d); setError(""); }).catch((e) => setError(String(e.message)));
   }, []);
   useEffect(() => {
     load();
-    const t = setInterval(load, 10000);
+    const t = setInterval(load, 60000); // safety net; live updates arrive over SSE
     return () => clearInterval(t);
   }, [load]);
+  useEvents((e) => {
+    load();
+    if (e.new && e.risk_tier === "critical") setFlash(`New critical incident: ${e.title}`);
+  });
 
   async function simulate() {
     setBusy(true);
@@ -42,9 +57,9 @@ export default function Queue() {
     ["Alerts correlated", rows.reduce((s, r) => s + r.alert_count, 0)],
   ];
   const shown = useMemo(
-    () => rows.filter((r) => (!status || r.status === status) && (!tier || r.risk_tier === tier) &&
+    () => rows.filter((r) => (!status || r.status === status) && (!tier || r.risk_tier === tier) && (!mine || r.assignee === me) &&
       (!q || `${r.title} ${r.entity_value}`.toLowerCase().includes(q.toLowerCase()))),
-    [rows, status, tier, q],
+    [rows, status, tier, q, mine, me],
   );
 
   return (
@@ -65,6 +80,12 @@ export default function Queue() {
         )}
       </div>
       {error && <Err msg={error} />}
+      {flash && (
+        <div role="alert" className="card flex items-center justify-between border-red-500/40 text-sm text-red-300">
+          <span>{flash}</span>
+          <button className="btn" onClick={() => setFlash("")}>Dismiss</button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {kpis.map(([k, v]) => (
           <div key={k} className="card">
@@ -83,11 +104,14 @@ export default function Queue() {
           <option value="">All statuses</option>
           {["open", "acknowledged", "escalated", "false_positive", "resolved"].map((s) => <option key={s} value={s}>{label(s)}</option>)}
         </select>
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Assigned to me
+        </label>
       </div>
       <div className="card overflow-x-auto p-0">
         <table className="w-full">
           <thead className="border-b border-zinc-800">
-            <tr>{["Risk", "Incident", "Entity", "Alerts", "Status", "Last seen"].map((h) => <th key={h} className="th">{h}</th>)}</tr>
+            <tr>{["Risk", "Incident", "Entity", "Alerts", "Status", "Assignee", "SLA", "Last seen"].map((h) => <th key={h} className="th">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/70">
             {shown.map((r) => (
@@ -97,10 +121,12 @@ export default function Queue() {
                 <td className="td font-mono text-xs text-zinc-400">{r.entity_type}={r.entity_value}</td>
                 <td className="td font-mono">{r.alert_count}</td>
                 <td className="td"><Badge tone={r.status}>{label(r.status)}</Badge></td>
+                <td className="td font-mono text-xs text-zinc-400">{r.assignee ?? "—"}</td>
+                <td className="td">{slaBadge(r)}</td>
                 <td className="td whitespace-nowrap text-zinc-400">{fmt(r.last_seen)}</td>
               </tr>
             ))}
-            {!shown.length && <tr><td colSpan={6} className="td text-center text-zinc-500">No incidents. Ask an admin to run the simulation, or ingest alerts with the API key.</td></tr>}
+            {!shown.length && <tr><td colSpan={8} className="td text-center text-zinc-500">No incidents. Ask an admin to run the simulation, or ingest alerts with the API key.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -39,6 +39,17 @@ services:
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       OTX_API_KEY: ${OTX_API_KEY:-}
       URLHAUS_API_KEY: ${URLHAUS_API_KEY:-}
+      DASHBOARD_URL: ${DASHBOARD_URL:-http://localhost:3000}
+      NOTIFY_MIN_TIER: ${NOTIFY_MIN_TIER:-critical}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-hyperion@localhost}
+      NOTIFY_EMAIL_TO: ${NOTIFY_EMAIL_TO:-}
+      PLAYBOOK_ENABLE_EXECUTION: ${PLAYBOOK_ENABLE_EXECUTION:-false}
+      PLAYBOOK_WEBHOOK_URL: ${PLAYBOOK_WEBHOOK_URL:-}
       # Blank = generated at startup and printed once: docker compose logs api | grep -i generated
       INGEST_API_KEY: ${INGEST_API_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-}

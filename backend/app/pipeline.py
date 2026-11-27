@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app import feedback
+from app import feedback, notify
 from app.enrichment import enrich
 from app.models import Alert, AuditLog, Enrichment, Incident, TriageReport, aware, utcnow
 from app.triage import SEV_RANK, build_context, triage
@@ -91,6 +91,7 @@ async def process_alerts(session: AsyncSession, alert_ids: list[uuid.UUID]) -> l
         session.add(TriageReport(incident_id=iid, provider=provider, model=model, **result.model_dump()))
         incident.risk_score, incident.risk_tier, incident.summary = result.risk_score, result.risk_tier, result.executive_summary
         incident.updated_at = utcnow()
+        await notify.maybe_notify(session, incident)
         done.append(iid)
     session.add(AuditLog(actor="system", action="pipeline.run", target_type="incident", note=f"Processed {len(alerts)} alert(s)",
                          detail={"incident_ids": [str(i) for i in done], "alert_ids": [str(a.id) for a in alerts]}))
