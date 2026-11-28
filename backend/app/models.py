@@ -33,7 +33,11 @@ class Incident(Base):
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False, index=True)
+    assignee: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Alert(Base):
@@ -55,6 +59,7 @@ class Alert(Base):
     file_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     raw: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    rule_key: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     dup_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     incident_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -142,3 +147,27 @@ class IntelHealth(Base):
     last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cooldown_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lookups: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class IncidentComment(Base):
+    __tablename__ = "incident_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    author: Mapped[str] = mapped_column(String(128), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class PlaybookRun(Base):
+    __tablename__ = "playbook_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    incident_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True)
+    playbook: Mapped[str] = mapped_column(String(32), nullable=False)
+    target: Mapped[str] = mapped_column(String(256), nullable=False)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # dry_run | executed | blocked | failed
+    result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

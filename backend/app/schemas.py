@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+from app import workflow
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
 RiskTier = Literal["low", "medium", "high", "critical"]
@@ -133,9 +135,73 @@ class IncidentOut(BaseModel):
     summary: str | None
     first_seen: datetime
     last_seen: datetime
+    created_at: datetime
+    assignee: str | None = None
+    acknowledged_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sla(self) -> dict[str, Any]:
+        return workflow.sla(self.risk_tier, self.created_at, self.acknowledged_at, self.resolved_at)
+
+
+class SimilarIncident(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+    risk_score: int | None
+    similarity: float
+    last_seen: datetime
+
+
+class CommentIn(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class CommentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    author: str
+    body: str
+    created_at: datetime
+
+
+class AssignIn(BaseModel):
+    assignee: str | None = Field(default=None, max_length=128)
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    username: str
+    role: str
+
+
+class PlaybookRunIn(BaseModel):
+    target: str = Field(min_length=1, max_length=256)
+    dry_run: bool = True
+
+
+class PlaybookRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    playbook: str
+    target: str
+    dry_run: bool
+    status: str
+    result: dict[str, Any]
+    actor: str
+    created_at: datetime
 
 
 class IncidentDetail(IncidentOut):
+    similar: list[SimilarIncident] = []
+    comments: list[CommentOut] = []
+    playbook_runs: list[PlaybookRunOut] = []
+    playbooks: list[dict[str, Any]] = []
     alerts: list[AlertOut]
     enrichments: list[EnrichmentOut]
     triage: TriageReportOut | None

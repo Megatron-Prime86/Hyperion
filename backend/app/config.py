@@ -23,6 +23,30 @@ class Settings(BaseSettings):
     intel_max_lookups: int = 8  # live indicators looked up per alert (quota guard)
     llm_timeout_seconds: float = 30.0
     dedup_window_minutes: int = 60
+    # SLA targets in minutes per risk tier ("tier=minutes,...")
+    sla_ack_minutes: str = "critical=15,high=60,medium=240,low=1440"
+    sla_resolve_minutes: str = "critical=240,high=480,medium=1440,low=4320"
+    # Notifications (a channel is skipped when not configured)
+    dashboard_url: str = "http://localhost:3000"
+    notify_min_tier: str = "critical"
+    slack_webhook_url: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "hyperion@localhost"
+    smtp_starttls: bool = True
+    notify_email_to: str = ""
+    # Response playbooks: dry-run only unless execution is explicitly enabled
+    playbook_enable_execution: bool = False
+    playbook_webhook_url: str = ""
+    playbook_protected_users: str = "root,administrator,admin,system"
+    # Analyst feedback loop: a rule analysts keep dismissing (or escalating) adjusts triage scores.
+    feedback_min_decisions: int = 3
+    feedback_ratio: float = 0.8
+    feedback_fp_penalty: int = 25
+    feedback_boost: int = 10
+    llm_max_deviation: int = 40  # LLM score may differ from the rule-based baseline by at most this much
     auto_migrate: bool = True
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     # Auth: blank secrets are generated at startup and logged once.

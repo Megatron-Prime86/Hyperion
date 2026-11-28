@@ -33,8 +33,15 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_context(incident, alerts, enrichments: dict) -> dict[str, Any]:
-    """Facts for triage. `enrichments` maps alert_id -> Enrichment row."""
+VERDICT_ORDER = ["false_positive", "needs_investigation", "true_positive"]
+
+
+def verdict_for(score: int) -> str:
+    return "true_positive" if score >= 60 else "needs_investigation" if score >= 25 else "false_positive"
+
+
+def build_context(incident, alerts, enrichments: dict, feedback: dict | None = None) -> dict[str, Any]:
+    """Facts for triage. `enrichments` maps alert_id -> Enrichment row; `feedback` maps rule_key -> analyst decision stats."""
     es = [enrichments[a.id] for a in alerts if a.id in enrichments]
     hits = [h for e in es for h in e.threat_intel.get("hits", [])]
     techniques = {t["id"]: t for e in es for t in e.mitre.get("techniques", [])}
@@ -44,6 +51,8 @@ def build_context(incident, alerts, enrichments: dict) -> dict[str, Any]:
         "entity": f"{incident.entity_type}={incident.entity_value}",
         "severity": max((a.severity for a in alerts), key=SEV_RANK.get),
         "alert_count": len(alerts),
+        "rule_keys": list(dict.fromkeys(a.rule_key for a in alerts if a.rule_key)),
+        "feedback": feedback or {},
         "intel_hits": list({(h["indicator"], h["verdict"]): h for h in hits}.values()),
         "intel_worst": max((h["verdict"] for h in hits), key={"benign": 0, "suspicious": 1, "malicious": 2}.get, default="none"),
         "techniques": list(techniques.values()),
@@ -65,7 +74,7 @@ def deterministic_triage(ctx: dict[str, Any]) -> TriageResult:
     score += {"critical": 10, "high": 6}.get(ctx["asset_level"], 0)
     score += 8 if len(ctx["tactics"]) >= 3 else 0
     score = max(0, min(100, score))
-    verdict = "true_positive" if score >= 60 else "needs_investigation" if score >= 25 else "false_positive"
+    verdict = verdict_for(score)
     top = max(ctx["alerts"], key=lambda a: SEV_RANK[a["severity"]])
     tactics = ", ".join(ctx["tactics"]) or "no mapped tactics"
     highlights = [f"{ctx['alert_count']} correlated alert(s) on {ctx['entity']}, peak severity {ctx['severity']}",
@@ -85,6 +94,51 @@ def deterministic_triage(ctx: dict[str, Any]) -> TriageResult:
                            f"Observed tactics: {tactics}. Risk {score}/100 ({tier_for(score)})."),
         evidence_highlights=highlights, recommended_next_steps=steps,
     )
+
+
+def apply_feedback(result: TriageResult, ctx: dict[str, Any]) -> TriageResult:
+    """Adjust the score using analyst history: dismissed patterns go down, escalated ones go up.
+    The penalty is withheld when strong evidence says the pattern may be hiding a real attack."""
+    keys, fb = ctx.get("rule_keys") or [], ctx.get("feedback") or {}
+    verdicts = [fb.get(k, {}).get("verdict") for k in keys]
+    delta, note = 0, None
+    if keys and all(v == "likely_false_positive" for v in verdicts):
+        strong = [why for why, hit in (("malicious threat intel", ctx["intel_worst"] == "malicious"),
+                                       ("critical severity", ctx["severity"] == "critical"),
+                                       ("critical asset", ctx["asset_level"] == "critical"),
+                                       ("3+ MITRE tactics", len(ctx["tactics"]) >= 3)) if hit]
+        s = fb[keys[0]]
+        if strong:
+            note = f"Analyst feedback: pattern usually dismissed ({s['false_positive']} FP vs {s['escalated']} escalated) but penalty withheld: {', '.join(strong)}"
+        else:
+            delta = -settings.feedback_fp_penalty
+            note = f"Analyst feedback: pattern dismissed as false positive {s['false_positive']}x vs escalated {s['escalated']}x (score {delta:+d})"
+    elif "likely_true_positive" in verdicts:
+        s = fb[keys[verdicts.index("likely_true_positive")]]
+        delta = settings.feedback_boost
+        note = f"Analyst feedback: pattern escalated {s['escalated']}x vs dismissed {s['false_positive']}x (score {delta:+d})"
+    if note is None:
+        return result
+    data = result.model_dump()
+    data["risk_score"] = max(0, min(100, result.risk_score + delta))
+    if delta < 0:  # the verdict follows the new score, but never drops more than one step
+        floor = max(VERDICT_ORDER.index(result.triage_verdict) - 1, 0)
+        data["triage_verdict"] = VERDICT_ORDER[max(VERDICT_ORDER.index(verdict_for(data["risk_score"])), floor)]
+    data["evidence_highlights"] = (result.evidence_highlights + [note])[:12]
+    return TriageResult(**data)
+
+
+def clamp_to_baseline(result: TriageResult, base: TriageResult) -> TriageResult:
+    """Bound how far a model can move the score from the rule-based baseline (limits prompt-injection damage)."""
+    limit = settings.llm_max_deviation
+    if abs(result.risk_score - base.risk_score) <= limit:
+        return result
+    data = result.model_dump()
+    data["risk_score"] = base.risk_score + (limit if result.risk_score > base.risk_score else -limit)
+    data["triage_verdict"] = base.triage_verdict
+    data["evidence_highlights"] = (result.evidence_highlights + [
+        f"Model score {result.risk_score} deviated more than {limit} points from the rule-based baseline ({base.risk_score}); adjusted."])[:12]
+    return TriageResult(**data)
 
 
 def wrap_untrusted(ctx: dict[str, Any]) -> tuple[str, str]:
@@ -134,14 +188,15 @@ def parse_llm_json(text: str) -> TriageResult:
 async def triage(ctx: dict[str, Any]) -> tuple[TriageResult, str, str | None]:
     """Returns (result, provider, model). provider: mock | openai | anthropic | fallback."""
     mode = settings.llm_mode
+    base = deterministic_triage(ctx)
     if mode == "mock":
-        return deterministic_triage(ctx), "mock", None
+        return apply_feedback(base, ctx), "mock", None
     model = settings.llm_model or DEFAULT_MODELS[mode]
     try:
         prompt, _ = wrap_untrusted(ctx)
         result = parse_llm_json(await _call_llm(SYSTEM_PROMPT, prompt))
         if ctx["intel_worst"] == "malicious" and result.risk_score < 50:
             raise ValueError("LLM score contradicts malicious threat-intel hit")  # injection / hallucination guard
-        return result, mode, model
+        return apply_feedback(clamp_to_baseline(result, base), ctx), mode, model
     except (httpx.HTTPError, ValidationError, ValueError, KeyError, IndexError):
-        return deterministic_triage(ctx), "fallback", model
+        return apply_feedback(base, ctx), "fallback", model

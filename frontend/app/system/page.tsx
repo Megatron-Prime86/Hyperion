@@ -1,80 +1,98 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api, type Audit, type Health, type IntelSource } from "../api";
-import { Badge, Err, fmt } from "../ui";
+import { useCallback, useEffect, useState } from "react";
+import { api, useLive, type Audit, type FeedbackRule, type Health, type IntelSource } from "../api";
+import { Badge, Empty, Err, Loading, fmt } from "../ui";
 
 export default function System() {
   const [h, setH] = useState<Health | null>(null);
-  const [logs, setLogs] = useState<Audit[]>([]);
+  const [logs, setLogs] = useState<Audit[] | null>(null);
   const [intel, setIntel] = useState<IntelSource[]>([]);
+  const [rules, setRules] = useState<FeedbackRule[]>([]);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const load = () => {
-      Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100"), api<IntelSource[]>("/api/v1/intel/status")])
-        .then(([a, b, c]) => { setH(a); setLogs(b); setIntel(c); setError(""); })
-        .catch((e) => setError(String(e.message)));
-    };
-    load();
-    const t = setInterval(load, 10000);
-    return () => clearInterval(t);
+  const load = useCallback(() => {
+    Promise.all([api<Health>("/api/v1/health"), api<Audit[]>("/api/v1/audit?limit=100"), api<IntelSource[]>("/api/v1/intel/status"), api<FeedbackRule[]>("/api/v1/feedback/rules")])
+      .then(([a, b, c, r]) => { setH(a); setLogs(b); setIntel(c); setRules(r); setError(""); })
+      .catch((e) => setError(String(e.message)));
   }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  useLive(load);
 
-  const cards: [string, string, string][] = h ? [
+  if (error && !h) return <Err msg={error} retry={load} />;
+  if (!h || !logs) return <Loading rows={5} />;
+
+  const cooling = (i: IntelSource) => !!i.cooldown_until && new Date(i.cooldown_until) > new Date();
+  const cards: [string, string, string][] = [
     ["API", h.status, "live"],
     ["Database", h.database, "live"],
     ["LLM", h.llm_mode === "mock" ? "mock (deterministic)" : `live · ${h.llm_mode}`, h.llm_mode === "mock" ? "mock" : "live"],
     ["Task queue", h.redis_fallback ? "inline / eager" : "Celery + Redis", h.redis_fallback ? "mock" : "live"],
-  ] : [];
+  ];
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-semibold">System health &amp; audit</h1>
+    <div className="space-y-6">
+      <h1>System health &amp; audit</h1>
       {error && <Err msg={error} />}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <section aria-label="Pipeline status" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {cards.map(([k, v, tone]) => (
-          <div key={k} className="card">
-            <div className="text-xs uppercase tracking-wide text-zinc-500">{k}</div>
-            <div className="mt-2"><Badge tone={tone}>{v}</Badge></div>
-          </div>
+          <div key={k} className="card"><div className="kicker">{k}</div><div className="mt-2"><Badge tone={tone}>{v}</Badge></div></div>
         ))}
-      </div>
-      <h2 className="pt-2 font-semibold">Threat intel sources</h2>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        {intel.map((i) => (
-          <div key={i.source} className="card space-y-1">
-            <div className="font-mono text-sm">{i.source}</div>
-            <Badge tone={!i.configured ? "" : i.cooldown_until && new Date(i.cooldown_until) > new Date() ? "high" : i.ok ? "live" : "high"}>
-              {!i.configured ? "no key" : i.cooldown_until && new Date(i.cooldown_until) > new Date() ? "cooling down" : i.ok ? "ok" : "error"}
-            </Badge>
-            <div className="text-xs text-zinc-500">{i.lookups} lookups · {i.cache_entries} cached</div>
-            {i.last_error && <div className="truncate text-xs text-red-300" title={i.last_error}>{i.last_error}</div>}
+      </section>
+
+      <section aria-labelledby="intel"><h2 id="intel" className="mb-3">Threat intel sources</h2>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          {intel.map((i) => (
+            <div key={i.source} className="card space-y-1">
+              <div className="font-mono text-sm">{i.source}</div>
+              <Badge tone={!i.configured ? "neutral" : cooling(i) || !i.ok ? "high" : "low"}>{!i.configured ? "no key" : cooling(i) ? "cooling down" : i.ok ? "ok" : "error"}</Badge>
+              <div className="text-xs text-muted">{i.lookups} lookups · {i.cache_entries} cached</div>
+              {i.last_error && <div className="truncate text-xs text-critical" title={i.last_error}>{i.last_error}</div>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section aria-labelledby="fb"><h2 id="fb" className="mb-3">Analyst feedback by alert pattern</h2>
+        {rules.length ? (
+          <div className="card overflow-x-auto p-0">
+            <table className="w-full">
+              <caption className="sr-only">Decisions per alert pattern</caption>
+              <thead className="border-b border-line bg-panel2"><tr>{["Pattern", "False positive", "Escalated", "Resolved", "Effect on scoring"].map((x) => <th key={x} scope="col" className="th">{x}</th>)}</tr></thead>
+              <tbody className="divide-y divide-line">
+                {rules.map((r) => (
+                  <tr key={r.rule_key}>
+                    <td className="td">{r.title}</td><td className="td font-mono">{r.false_positive}</td><td className="td font-mono">{r.escalated}</td><td className="td font-mono">{r.resolved}</td>
+                    <td className="td">{r.verdict ? <Badge tone={r.verdict === "likely_false_positive" ? "low" : "high"}>{r.verdict.replace(/_/g, " ")}</Badge> : <span className="text-muted">none yet</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
-      <h2 className="pt-2 font-semibold">Audit log</h2>
-      <div className="card overflow-x-auto p-0">
-        <table className="w-full">
-          <thead className="border-b border-zinc-800">
-            <tr>{["Time", "Actor", "Action", "Target", "Note"].map((x) => <th key={x} className="th">{x}</th>)}</tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-800/70">
-            {logs.map((l) => (
-              <tr key={l.id}>
-                <td className="td whitespace-nowrap text-zinc-400">{fmt(l.created_at)}</td>
-                <td className="td font-mono text-xs">{l.actor}</td>
-                <td className="td"><Badge>{l.action}</Badge></td>
-                <td className="td font-mono text-xs">
-                  {l.target_type === "incident" && l.target_id ? <Link className="text-emerald-300 hover:underline" href={`/incidents/${l.target_id}`}>{l.target_id.slice(0, 8)}</Link> : l.target_type}
-                </td>
-                <td className="td text-zinc-400">{l.note}</td>
-              </tr>
-            ))}
-            {!logs.length && <tr><td colSpan={5} className="td text-center text-zinc-500">No audit entries yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+        ) : <Empty title="No analyst decisions yet" hint="Mark incidents False Positive or Escalate to teach the scorer." />}
+      </section>
+
+      <section aria-labelledby="audit"><h2 id="audit" className="mb-3">Audit log</h2>
+        {logs.length ? (
+          <div className="card overflow-x-auto p-0">
+            <table className="w-full">
+              <caption className="sr-only">Most recent audit entries</caption>
+              <thead className="border-b border-line bg-panel2"><tr>{["Time", "Actor", "Action", "Target", "Note"].map((x) => <th key={x} scope="col" className="th">{x}</th>)}</tr></thead>
+              <tbody className="divide-y divide-line">
+                {logs.map((l) => (
+                  <tr key={l.id}>
+                    <td className="td whitespace-nowrap text-muted">{fmt(l.created_at)}</td>
+                    <td className="td font-mono text-xs">{l.actor}</td>
+                    <td className="td"><Badge>{l.action}</Badge></td>
+                    <td className="td font-mono text-xs">{l.target_type === "incident" && l.target_id ? <Link className="link" href={`/incidents/${l.target_id}`}>{l.target_id.slice(0, 8)}</Link> : l.target_type}</td>
+                    <td className="td text-muted">{l.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty title="No audit entries yet" />}
+      </section>
     </div>
   );
 }
