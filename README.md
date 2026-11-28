@@ -57,6 +57,16 @@ Sample packs (recorded Wazuh SSH brute-force-to-root chain, CloudTrail account t
 
 Set any of `ABUSEIPDB_API_KEY`, `VIRUSTOTAL_API_KEY`, `OTX_API_KEY`, `URLHAUS_API_KEY`. External IPs, domains and hashes are looked up (max `INTEL_MAX_LOOKUPS` per alert), cached in the database for `INTEL_CACHE_HOURS`, and skipped while a source is cooling down after a rate limit (429 honours `Retry-After`) or an auth error. Network or provider failures never fail the pipeline; the built-in local feed keeps working offline. Source health is on the **System & Audit** page and `GET /api/v1/intel/status`. Verdict thresholds are heuristics (e.g. VirusTotal: 3+ malicious engines = malicious).
 
+## Dashboard and UI
+
+Pages: **Dashboard** (KPI cards that link to filtered queue views, incidents over time, open risk distribution, needs-attention list, top entities), **Queue**, **ATT&CK** (heatmap of techniques your incidents hit, `GET /api/v1/stats/mitre?days=`), **System & Audit**, and the incident page (risk gauge, attack-stage rail, AI triage beside risk factors, alert timeline with tactic tags).
+
+- **Filters live in the URL**, so views can be bookmarked or shared: `/queue?status=active&tier=critical,high&assignee=me&sla=overdue&q=dc-01`. The header search box goes to `/queue?q=...`.
+- **Light and dark themes** with a toggle (saved in the browser, defaults to your system setting, no flash on load). Colours are tokens in `frontend/app/globals.css`; every text/background pair there was checked for WCAG AA contrast (4.5:1) in both themes.
+- **Keyboard:** `/` focuses search, `Esc` closes the mobile menu, a skip-to-content link is first on every page, and charts have screen-reader tables.
+- **Responsive:** sidebar becomes a drawer on small screens; tables scroll inside their card; no page scrolls sideways at 390, 768 or 1360 px.
+- Charts are hand-written SVG (no chart library), so the frontend has no new dependencies.
+
 ## Analyst workflow
 
 - **Assignment, notes, SLA.** Assign an incident to any user, add notes, and see acknowledge/resolve SLA state (`ok`, `due soon`, `overdue`, `met`, `missed`). The clock starts when the incident is created; targets per risk tier are `SLA_ACK_MINUTES` / `SLA_RESOLVE_MINUTES` (defaults: critical 15 min / 4 h, high 1 h / 8 h, medium 4 h / 24 h, low 24 h / 72 h). The first assignment or action counts as acknowledging; Resolve and False Positive count as resolving. Use **Assigned to me** on the queue to filter.

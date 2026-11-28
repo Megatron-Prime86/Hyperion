@@ -1,9 +1,64 @@
 @import "tailwindcss";
 
-:root { color-scheme: dark; }
-body { @apply bg-zinc-950 text-zinc-200 antialiased; font-family: ui-sans-serif, system-ui, sans-serif; }
-.card { @apply rounded-lg border border-zinc-800 bg-zinc-900/60 p-4; }
-.btn { @apply rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium transition hover:bg-zinc-800 disabled:opacity-50; }
-.input { @apply rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 outline-none focus:border-emerald-500; }
-.th { @apply px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-zinc-500; }
-.td { @apply px-3 py-2 text-sm; }
+/* Design tokens. Every colour pair used for text was checked against WCAG AA (4.5:1) in both themes. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0c10; --surface: #12161c; --surface-2: #1a2029; --line: #27303b;
+  --fg: #e6e9ee; --muted: #9aa4b2; --accent: #34d399; --on-accent: #052e22;
+  --t-critical: #fca5a5; --t-high: #fdba74; --t-medium: #fde047; --t-low: #6ee7b7; --t-info: #7dd3fc; --t-neutral: #cbd5e1;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f6f8; --surface: #ffffff; --surface-2: #eef1f4; --line: #d5dbe3;
+  --fg: #12161c; --muted: #4a5565; --accent: #047857; --on-accent: #ffffff;
+  --t-critical: #b91c1c; --t-high: #9a3412; --t-medium: #854d0e; --t-low: #065f46; --t-info: #0369a1; --t-neutral: #334155;
+}
+
+@theme inline {
+  --color-app: var(--bg);
+  --color-panel: var(--surface);
+  --color-panel2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-critical: var(--t-critical);
+  --color-high: var(--t-high);
+  --color-medium: var(--t-medium);
+  --color-low: var(--t-low);
+  --color-info: var(--t-info);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  body { @apply bg-app text-fg font-sans antialiased; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  h1 { @apply text-xl font-semibold tracking-tight; }
+  h2 { @apply text-base font-semibold; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+}
+
+@layer components {
+  .card { @apply rounded-xl border border-line bg-panel p-4; }
+  .btn { @apply inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-line bg-panel px-3 py-1.5 text-sm font-medium transition hover:bg-panel2 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply border-accent bg-accent text-on-accent hover:bg-accent hover:brightness-110; }
+  .btn-danger { @apply border-critical/50 text-critical; }
+  .input { @apply min-h-9 rounded-md border border-line bg-panel px-2.5 py-1.5 text-sm text-fg placeholder:text-muted; }
+  .th { @apply px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-muted; }
+  .td { @apply px-3 py-2.5 text-sm; }
+  .link { @apply text-accent underline-offset-2 hover:underline; }
+  .kicker { @apply text-xs font-medium uppercase tracking-wide text-muted; }
+  .skip { @apply sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-on-accent; }
+  .skeleton { @apply animate-pulse rounded-md bg-panel2; }
+
+  .badge { @apply inline-block whitespace-nowrap rounded border px-1.5 py-0.5 font-mono text-xs; }
+  .badge-critical { color: var(--t-critical); background: color-mix(in srgb, var(--t-critical) 14%, transparent); border-color: color-mix(in srgb, var(--t-critical) 40%, transparent); }
+  .badge-high { color: var(--t-high); background: color-mix(in srgb, var(--t-high) 14%, transparent); border-color: color-mix(in srgb, var(--t-high) 40%, transparent); }
+  .badge-medium { color: var(--t-medium); background: color-mix(in srgb, var(--t-medium) 14%, transparent); border-color: color-mix(in srgb, var(--t-medium) 40%, transparent); }
+  .badge-low { color: var(--t-low); background: color-mix(in srgb, var(--t-low) 14%, transparent); border-color: color-mix(in srgb, var(--t-low) 40%, transparent); }
+  .badge-info { color: var(--t-info); background: color-mix(in srgb, var(--t-info) 14%, transparent); border-color: color-mix(in srgb, var(--t-info) 40%, transparent); }
+  .badge-neutral { color: var(--t-neutral); background: color-mix(in srgb, var(--t-neutral) 14%, transparent); border-color: color-mix(in srgb, var(--t-neutral) 40%, transparent); }
+}

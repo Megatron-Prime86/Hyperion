@@ -22,13 +22,19 @@ export default function Login() {
   }
 
   return (
-    <form onSubmit={submit} className="card mx-auto mt-24 w-full max-w-sm space-y-4">
-      <h1 className="font-mono text-xl font-bold tracking-widest text-emerald-400">HYPERION</h1>
-      <p className="text-sm text-zinc-400">Sign in to the SOC console.</p>
-      <input className="input w-full" placeholder="Username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-      <input className="input w-full" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      {error && <p className="text-sm text-red-300">{error}</p>}
-      <button className="btn w-full border-emerald-600 text-emerald-300" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-    </form>
+    <main className="grid min-h-dvh place-items-center p-4">
+      <form onSubmit={submit} className="card w-full max-w-sm space-y-4">
+        <div>
+          <h1 className="font-mono text-xl font-bold tracking-widest text-accent">HYPERION</h1>
+          <p className="mt-1 text-sm text-muted">Sign in to the SOC console.</p>
+        </div>
+        <div><label htmlFor="u" className="kicker">Username</label>
+          <input id="u" className="input mt-1 w-full" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required /></div>
+        <div><label htmlFor="p" className="kicker">Password</label>
+          <input id="p" className="input mt-1 w-full" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></div>
+        {error && <p role="alert" className="text-sm text-critical">{error}</p>}
+        <button className="btn btn-primary w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      </form>
+    </main>
   );
 }

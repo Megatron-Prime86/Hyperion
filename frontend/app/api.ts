@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -101,11 +101,19 @@ export async function download(path: string, fallbackName: string) {
   URL.revokeObjectURL(url);
 }
 
-/** Live incident updates via server-sent events (fetch streaming so the Authorization header can be sent). Reconnects with backoff. */
-export function useEvents(onEvent: (e: LiveEvent) => void) {
-  const handler = useRef(onEvent);
-  handler.current = onEvent;
+export const CLOSED = ["resolved", "false_positive"];
+export const TIERS = ["critical", "high", "medium", "low"] as const;
+export const TACTICS = ["Initial Access", "Execution", "Persistence", "Privilege Escalation", "Defense Evasion", "Credential Access",
+  "Discovery", "Lateral Movement", "Collection", "Command and Control", "Exfiltration", "Impact"];
+export type MitreStat = { id: string; name: string; tactic: string; alerts: number; incidents: number; incident_ids: string[] };
+
+const LIVE = "hyperion:incident";
+
+/** Opens the live stream once (in the app shell) and re-broadcasts events on window. Uses fetch streaming so the
+ *  Authorization header can be sent; reconnects with backoff. */
+export function useEvents(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     const ctl = new AbortController();
     let since = new Date().toISOString();
     (async () => {
@@ -131,7 +139,7 @@ export function useEvents(onEvent: (e: LiveEvent) => void) {
               if (!data) continue;
               try {
                 const ev = JSON.parse(data.slice(6));
-                if (ev.type === "incident_changed") { since = ev.updated_at; handler.current(ev as LiveEvent); }
+                if (ev.type === "incident_changed") { since = ev.updated_at; window.dispatchEvent(new CustomEvent(LIVE, { detail: ev })); }
               } catch { /* ignore malformed frame */ }
             }
           }
@@ -142,5 +150,32 @@ export function useEvents(onEvent: (e: LiveEvent) => void) {
       }
     })();
     return () => ctl.abort();
+  }, [enabled]);
+}
+
+/** Subscribe to live incident events from any component. */
+export function useLive(onEvent: (e: LiveEvent) => void) {
+  const handler = useRef(onEvent);
+  handler.current = onEvent;
+  useEffect(() => {
+    const on = (e: Event) => handler.current((e as CustomEvent<LiveEvent>).detail);
+    window.addEventListener(LIVE, on);
+    return () => window.removeEventListener(LIVE, on);
   }, []);
+}
+
+/** Incident list that refreshes on live events (rows is null until the first load finishes). */
+export function useIncidents() {
+  const [rows, setRows] = useState<Incident[] | null>(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    api<Incident[]>("/api/v1/incidents?limit=500").then((d) => { setRows(d); setError(""); }).catch((e) => setError(String(e.message)));
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60000); // safety net; live updates arrive over SSE
+    return () => clearInterval(t);
+  }, [load]);
+  useLive(load);
+  return { rows, error, reload: load };
 }

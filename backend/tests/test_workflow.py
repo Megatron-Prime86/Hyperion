@@ -211,3 +211,17 @@ async def test_notification_test_endpoint_is_admin_only(client, monkeypatch):
     assert (await client.post("/api/v1/notifications/test")).json() == {"configured": {"slack": False, "email": False}, "results": {}}
     async with _analyst() as analyst:
         assert (await analyst.post("/api/v1/notifications/test")).status_code == 403
+
+
+# ---------------- Phase 8: ATT&CK stats ----------------
+async def test_mitre_stats(client):
+    assert (await client.get("/api/v1/stats/mitre")).json() == []
+    await client.post("/api/v1/simulator/replay")
+    stats = (await client.get("/api/v1/stats/mitre")).json()
+    dump = next(s for s in stats if s["id"] == "T1003.001")
+    assert dump["tactic"] == "Credential Access" and dump["incidents"] == 1 and len(dump["incident_ids"]) == 1
+    assert [s["incidents"] for s in stats] == sorted((s["incidents"] for s in stats), reverse=True)
+    assert (await client.get("/api/v1/stats/mitre", params={"days": 0})).status_code == 422
+    anon = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t")
+    async with anon:
+        assert (await anon.get("/api/v1/stats/mitre")).status_code == 401

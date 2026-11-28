@@ -401,3 +401,23 @@ async def event_stream(request: Request, since: datetime | None = None, once: bo
 async def test_notifications(admin: Principal = Depends(require_admin)) -> dict[str, object]:
     results = await notify.notify_all("[Hyperion] test notification", f"Test sent by {admin.username}.")
     return {"configured": notify.configured(), "results": results}
+
+
+@app.get("/api/v1/stats/mitre")
+async def mitre_stats(days: int = Query(30, ge=1, le=365), _: Principal = Depends(current_user),
+                      session: AsyncSession = Depends(get_session)) -> list[dict[str, Any]]:
+    """ATT&CK techniques seen in incidents active within the last `days`, for the heatmap."""
+    since = utcnow() - timedelta(days=days)
+    rows = (await session.execute(
+        select(Enrichment.mitre, Alert.incident_id).join(Alert, Enrichment.alert_id == Alert.id)
+        .join(Incident, Alert.incident_id == Incident.id).where(Incident.last_seen >= since)
+    )).all()
+    agg: dict[str, dict[str, Any]] = {}
+    for mitre, incident_id in rows:
+        for t in (mitre or {}).get("techniques", []):
+            a = agg.setdefault(t["id"], {"id": t["id"], "name": t["name"], "tactic": t["tactic"], "alerts": 0, "ids": set()})
+            a["alerts"] += 1
+            a["ids"].add(incident_id)
+    out = [{"id": a["id"], "name": a["name"], "tactic": a["tactic"], "alerts": a["alerts"], "incidents": len(a["ids"]),
+            "incident_ids": [str(i) for i in sorted(a["ids"], key=str)[:5]]} for a in agg.values()]
+    return sorted(out, key=lambda a: (-a["incidents"], a["id"]))
